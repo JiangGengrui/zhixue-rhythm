@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Field, Stat } from '../components';
+import { api } from '../data/api';
 import type { Settings } from '../domain/types';
 import type { AppState, Actions } from '../store';
 
@@ -10,6 +11,9 @@ export function SettingsPage({ state, actions }: { state: AppState; actions: Act
   const [weekStart, setWeekStart] = useState<0 | 1>(state.settings.weekStart);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [password, setPassword] = useState('');
+  const [delMsg, setDelMsg] = useState('');
+  const [delBusy, setDelBusy] = useState(false);
 
   const totalMinutes = useMemo(
     () => hours.reduce((s, h) => s + Math.max(0, Math.round(h * 60)), 0),
@@ -84,12 +88,54 @@ export function SettingsPage({ state, actions }: { state: AppState; actions: Act
         </div>
       </Card>
 
-      <Card title="账号与数据" desc="数据保存在服务端，按账号隔离。">
+      <Card title="账号与数据" desc="数据保存在服务端，按账号隔离，可随时导出带走。">
         <ul className="bullets">
           <li>当前账号：{state.user?.name}（{state.user?.email}）</li>
           <li>会话有效期 30 天，退出后需重新登录。</li>
           <li>删除计划项会同时清理其在本周的任务块，已完成的记录不再计入周报。</li>
         </ul>
+
+        <div className="row">
+          <Button onClick={() => { location.href = api.exportUrl('json'); }}>导出全部数据（JSON）</Button>
+          <Button onClick={() => { location.href = api.exportUrl('csv'); }}>导出任务记录（CSV）</Button>
+        </div>
+
+        <div className="danger-zone">
+          <strong>注销账号</strong>
+          <p className="muted">目标、计划项与全部打卡记录会被永久删除，无法恢复。</p>
+          <div className="row">
+            <input
+              type="password"
+              placeholder="输入密码确认"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            <Button
+              variant="danger"
+              disabled={delBusy}
+              onClick={async () => {
+                if (!password) {
+                  setDelMsg('请输入密码');
+                  return;
+                }
+                if (!confirm('注销后所有数据将被永久删除，确定继续？')) return;
+                setDelBusy(true);
+                setDelMsg('');
+                try {
+                  await actions.deleteAccount(password);
+                } catch (err) {
+                  setDelMsg(err instanceof Error ? err.message : '注销失败');
+                } finally {
+                  setDelBusy(false);
+                }
+              }}
+            >
+              {delBusy ? '注销中…' : '注销账号'}
+            </Button>
+          </div>
+          {delMsg && <span className="warn">{delMsg}</span>}
+        </div>
       </Card>
     </div>
   );

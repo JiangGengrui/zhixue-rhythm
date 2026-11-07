@@ -44,6 +44,7 @@ export interface Actions {
     skipReason?: Block['skipReason'],
   ) => Promise<void>;
   seedDemo: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
 }
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : '操作失败，请稍后重试');
@@ -203,13 +204,19 @@ export function useAppState() {
     });
   }, [run, load]);
 
+  const deleteAccount = useCallback(async (password: string) => {
+    await api.deleteAccount(password);
+    setState(emptyState);
+    setPhase('guest');
+  }, []);
+
   return {
     phase,
     error,
     state,
     actions: {
       login, register, logout, refresh: load,
-      setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo,
+      setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
     } satisfies Actions,
   };
 }

@@ -43,6 +43,8 @@ export interface PlanItem {
   subject: Subject;
   /** 预估总工时（分钟） */
   estimateMin: number;
+  /** 剩余工时（分钟），完成打卡后按实际投入扣减；旧数据缺省时等于 estimateMin */
+  remainingMin?: number;
   /** 权重 1-5，越大越先排 */
   weight: number;
 }

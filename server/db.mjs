@@ -78,6 +78,12 @@ function migrate(db) {
       PRIMARY KEY (user_id, op_id)
     );
   `);
+
+  // 增量迁移：任务剩余工时（老库补列，默认取预估工时）
+  const cols = db.prepare('PRAGMA table_info(items)').all();
+  if (!cols.some((c) => c.name === 'remaining_min')) {
+    db.exec('ALTER TABLE items ADD COLUMN remaining_min INTEGER');
+  }
 }
 
 export const nowISO = () => new Date().toISOString();

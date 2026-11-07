@@ -271,3 +271,14 @@ p { margin: 0; }
 .day-field input { width: 100%; text-align: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; background: #fff; }
 .day-field small { font-size: 10px; color: var(--soft); }
 @media (max-width: 620px) { .day-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ── 危险操作区 ── */
+.danger-zone {
+  margin-top: 18px; padding: 16px; border: 1px solid #f1ddd8; border-radius: 12px;
+  background: #fdf7f6; display: grid; gap: 8px;
+}
+.danger-zone strong { font-size: 13.5px; color: #8f564d; }
+.danger-zone .row { margin-top: 4px; }
+.danger-zone input {
+  border: 1px solid #ecd6d0; border-radius: 9px; padding: 8px 10px; background: #fff; min-width: 180px;
+}

@@ -64,6 +64,7 @@ function normalizeItem(row) {
     title: row.title,
     subject: row.subject,
     estimateMin: row.estimate_min,
+    remainingMin: row.remaining_min ?? row.estimate_min,
     weight: row.weight,
   };
 }
@@ -100,8 +101,16 @@ export function createApi(db) {
     `),
     itemsByUser: db.prepare('SELECT * FROM items WHERE user_id = ? ORDER BY created_at ASC'),
     insertItem: db.prepare(
-      'INSERT INTO items (id, user_id, goal_id, title, subject, estimate_min, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO items (id, user_id, goal_id, title, subject, estimate_min, remaining_min, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ),
+    consumeWork: db.prepare(
+      'UPDATE items SET remaining_min = MAX(0, COALESCE(remaining_min, estimate_min) - ?) WHERE id = ? AND user_id = ?',
+    ),
+    blockedElsewhere: db.prepare(
+      "SELECT DISTINCT item_id FROM blocks WHERE user_id = ? AND status IN ('pending','running') AND (date < ? OR date > ?)",
+    ),
+    sessionsOfUser: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     itemById: db.prepare('SELECT * FROM items WHERE id = ? AND user_id = ?'),
     deleteItem: db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?'),
     deleteBlocksOfItem: db.prepare('DELETE FROM blocks WHERE item_id = ? AND user_id = ?'),
@@ -172,6 +181,56 @@ export function createApi(db) {
 
     'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
 
+    'GET /api/export': ({ user, query, res }) => {
+      const format = String(query.get('format') ?? 'json').toLowerCase();
+      const state = stateOf(user);
+      const stamp = new Date().toISOString().slice(0, 10);
+
+      if (format === 'csv') {
+        const byId = new Map(state.items.map((i) => [i.id, i]));
+        const head = ['日期', '开始', '结束', '任务', '科目', '状态', '计划分钟', '实际分钟'];
+        const rows = [head];
+        for (const b of state.blocks) {
+          const item = byId.get(b.itemId);
+          rows.push([
+            b.date,
+            fmtMinute(b.startMin),
+            fmtMinute(b.endMin),
+            item?.title ?? '',
+            item?.subject ?? '',
+            b.status,
+            String(b.endMin - b.startMin),
+            b.actualMin == null ? '' : String(b.actualMin),
+          ]);
+        }
+        const csv = '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+        sendFile(res, csv, 'text/csv; charset=utf-8', `zhixue-blocks-${stamp}.csv`);
+        return { __sent: true };
+      }
+
+      const payload = { exportedAt: nowISO(), ...state };
+      sendFile(res, JSON.stringify(payload, null, 2), 'application/json; charset=utf-8', `zhixue-export-${stamp}.json`);
+      return { __sent: true };
+    },
+
+    'DELETE /api/account': ({ user, body, res }) => {
+      const password = String(body?.password ?? '');
+      const row = q.userById.get(user.id);
+      if (!row) throw unauthorized();
+      if (!verifyPassword(password, row.pass_hash)) throw bad('E1023', '密码不正确，无法注销');
+      db.exec('BEGIN');
+      try {
+        q.sessionsOfUser.run(user.id);
+        q.deleteUser.run(user.id);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      res.setHeader('Set-Cookie', clearCookie);
+      return { ok: true };
+    },
+
     'GET /api/state': ({ user }) => stateOf(user),
 
     'PUT /api/goal': ({ user, body }) => {
@@ -203,10 +262,14 @@ export function createApi(db) {
         title: str(body.title, '任务名称', 80),
         subject: String(body.subject ?? 'other'),
         estimateMin: int(body.estimateMin, '预估工时', 5, 1440),
+        remainingMin: int(body.estimateMin, '预估工时', 5, 1440),
         weight: int(body.weight ?? 3, '权重', 1, 5),
       };
       assert(SUBJECTS.has(item.subject), 'E1009', '科目取值不合法');
-      q.insertItem.run(item.id, user.id, item.goalId, item.title, item.subject, item.estimateMin, item.weight, nowISO());
+      q.insertItem.run(
+        item.id, user.id, item.goalId, item.title, item.subject,
+        item.estimateMin, item.estimateMin, item.weight, nowISO(),
+      );
       return { item };
     },
 
@@ -228,36 +291,62 @@ export function createApi(db) {
       const from = body.from ? dateStr(body.from, '排程起始日') : weekStart;
       assert(from >= weekStart && from <= weekEnd, 'E1021', '排程起始日必须落在本周');
 
-      const items = q.itemsByUser.all(user.id).map(normalizeItem).filter((i) => i.goalId === goal.id);
-      const packed = packWeek(items, user.settings, weekStart, from);
+      // 本周已有块原样保留（已完成记录不会被重排覆盖），只为没有块的任务补排
+      const existingWeek = q.blocksByWeek.all(user.id, weekStart, weekEnd);
+      const existingItems = new Set(existingWeek.map((row) => row.item_id));
 
-      // 保留同一任务块的完成状态，避免重新生成丢失记录
-      const existing = new Map(q.blocksByWeek.all(user.id, weekStart, weekEnd).map((row) => [row.id, row]));
+      // 已有块占用的时间从当日容量中扣除
+      const usedByDate = new Map();
+      for (const row of existingWeek) {
+        usedByDate.set(row.date, (usedByDate.get(row.date) ?? 0) + (row.end_min - row.start_min));
+      }
+      const weekdays = user.settings.weekdays.slice();
+      for (let i = 0; i < 7; i++) {
+        const date = addDays(weekStart, i);
+        const used = usedByDate.get(date) ?? 0;
+        const wd = new Date(`${date}T00:00:00`).getDay();
+        weekdays[wd] = Math.max(0, (weekdays[wd] ?? 0) - used);
+      }
+      const adjusted = { ...user.settings, weekdays };
 
-      db.exec('BEGIN');
-      try {
-        q.deleteWeek.run(user.id, weekStart, weekEnd);
-        for (const b of packed.blocks) {
-          const old = existing.get(b.id);
-          q.insertBlock.run(
-            b.id, user.id, b.itemId, b.date, b.startMin, b.endMin, b.isBuffer ? 1 : 0,
-            old?.status ?? b.status,
-            old?.actual_min ?? null,
-            old?.skip_reason ?? null,
-            nowISO(),
-          );
+      const bookedElsewhere = new Set(
+        q.blockedElsewhere.all(user.id, weekStart, weekEnd).map((row) => row.item_id),
+      );
+      const items = q.itemsByUser
+        .all(user.id)
+        .map(normalizeItem)
+        .filter((i) => i.goalId === goal.id)
+        .filter((i) => (i.remainingMin ?? i.estimateMin) > 0)
+        .filter((i) => !existingItems.has(i.id))
+        .filter((i) => !bookedElsewhere.has(i.id))
+        .map((i) => ({ ...i, estimateMin: i.remainingMin ?? i.estimateMin }));
+
+      const packed = packWeek(items, adjusted, weekStart, from);
+
+      if (packed.blocks.length > 0) {
+        db.exec('BEGIN');
+        try {
+          for (const b of packed.blocks) {
+            q.insertBlock.run(
+              b.id, user.id, b.itemId, b.date, b.startMin, b.endMin, b.isBuffer ? 1 : 0,
+              b.status, null, null, nowISO(),
+            );
+          }
+          db.exec('COMMIT');
+        } catch (err) {
+          db.exec('ROLLBACK');
+          throw err;
         }
-        db.exec('COMMIT');
-      } catch (err) {
-        db.exec('ROLLBACK');
-        throw err;
       }
 
+      const allBlocks = q.blocksByWeek.all(user.id, weekStart, weekEnd).map(normalizeBlock);
+      const totalCapacity = weekWeekCapacity(user.settings, weekStart);
       return {
-        blocks: q.blocksByWeek.all(user.id, weekStart, weekEnd).map(normalizeBlock),
-        capacityMin: packed.capacityMin,
-        plannedMin: packed.plannedMin,
-        bufferMin: packed.bufferMin,
+        blocks: allBlocks,
+        capacityMin: totalCapacity,
+        plannedMin: allBlocks.reduce((sum, b) => sum + (b.endMin - b.startMin), 0),
+        bufferMin: allBlocks.filter((b) => b.isBuffer).reduce((sum, b) => sum + (b.endMin - b.startMin), 0),
+        added: packed.blocks.length,
         suggestions: packed.suggestions,
         overflow: packed.overflow.map((o) => ({ title: o.item.title, estimateMin: o.item.estimateMin, reason: o.reason })),
       };
@@ -396,8 +485,40 @@ export function createApi(db) {
     }
 
     q.updateBlock.run(status, actualMin, skipReason, nowISO(), id, user.id);
+    // 完成时按实际投入扣减剩余工时（未完成的工作量留到下一次排程）
+    if (status === 'done' && actualMin) {
+      q.consumeWork.run(actualMin, block.item_id, user.id);
+    }
     return { block: normalizeBlock(q.blockById.get(id, user.id)) };
   }
+}
+
+function weekWeekCapacity(settings, weekStart) {
+  let total = 0;
+  for (let i = 0; i < 7; i++) {
+    const wd = new Date(`${addDays(weekStart, i)}T00:00:00`).getDay();
+    total += Math.max(0, settings.weekdays[wd] ?? 0);
+  }
+  return total;
+}
+
+function fmtMinute(min) {
+  const m = Math.max(0, Math.round(min));
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+function csvCell(value) {
+  const s = String(value ?? '');
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function sendFile(res, body, contentType, filename) {
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
 }
 
 function addDays(iso, days) {

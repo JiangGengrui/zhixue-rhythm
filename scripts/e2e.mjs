@@ -227,6 +227,8 @@ async function main() {
   await sleep(700);
   body = await cdp.text();
   assert(body.includes('每周可用时间'), '设置页未渲染');
+  assert(body.includes('导出全部数据') && body.includes('导出任务记录'), '设置页缺少数据导出入口');
+  assert(body.includes('注销账号'), '设置页缺少注销入口');
 
   const changed = await cdp.eval(`
     const inputs = [...document.querySelectorAll('.day-field input')];

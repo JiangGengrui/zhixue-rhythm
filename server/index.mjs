@@ -48,6 +48,7 @@ export function startServer(options = {}) {
           ip: req.socket.remoteAddress,
         });
         if (result === undefined) throw new HttpError(404, 'E4004', '接口不存在');
+        if (result && result.__sent) return;
         sendJson(res, 200, result);
         return;
       }

@@ -200,6 +200,9 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
                 <span className={`tag tag-${i.subject}`}>{SUBJECT_LABEL[i.subject]}</span>
                 <strong>{i.title}</strong>
                 <span className="muted">{fmtDuration(i.estimateMin)}</span>
+                {typeof i.remainingMin === 'number' && i.remainingMin !== i.estimateMin && (
+                  <span className="muted">剩余 {fmtDuration(i.remainingMin)}</span>
+                )}
                 <span className="muted">权重 {i.weight}</span>
                 <Button variant="quiet" onClick={() => actions.removeItem(i.id)} aria-label={`删除 ${i.title}`}>
                   删除

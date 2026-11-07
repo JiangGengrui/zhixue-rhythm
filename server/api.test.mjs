@@ -177,14 +177,16 @@ test('服务端生成周计划：支持从指定日期起排，并保留完成�
   assert.equal(gen.status, 200, JSON.stringify(gen.json));
   assert.ok(gen.json.blocks.length > 0);
   for (const b of gen.json.blocks) assert.ok(b.date >= '2026-11-05', `排到了过去：${b.date}`);
-  assert.equal(gen.json.capacityMin, 420); // 周四、周五各 150 + 周六 120
+  assert.equal(gen.json.capacityMin, 870); // 整周容量（capacityMin 表示本周可用，from 只影响排程范围）
 
   const first = gen.json.blocks[0];
-  await call('PATCH', `/api/blocks/${first.id}`, { status: 'done', actualMin: 130 }, cookie);
+  // 只完成一半工时：剩余量会再次排入，且完成状态被保留
+  await call('PATCH', `/api/blocks/${first.id}`, { status: 'done', actualMin: 60 }, cookie);
   const again = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02', from: '2026-11-05' }, cookie);
   const kept = again.json.blocks.find((b) => b.id === first.id);
+  assert.ok(kept, '剩余工时未重新排入');
   assert.equal(kept.status, 'done');
-  assert.equal(kept.actualMin, 130);
+  assert.equal(kept.actualMin, 60);
 });
 
 test('服务端周报：指标来自真实记录且归因合计 100', async () => {
@@ -248,6 +250,85 @@ test('设置接口：校验每日时长并影响周容量', async () => {
   assert.equal(gen.status, 200);
   // 新容量：周一至周五各 60 → 300
   assert.equal(gen.json.capacityMin, 300);
+});
+
+test('导出：JSON 完整快照与 CSV 任务记录', async () => {
+  const { cookie } = await register('export@test.dev');
+  await call('PUT', '/api/goal', { title: '导出目标', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: '导出任务', subject: 'math', estimateMin: 60, weight: 3 }, cookie);
+  await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+
+  const jsonRes = await fetch(base + '/api/export?format=json', { headers: { Cookie: cookie } });
+  assert.equal(jsonRes.status, 200);
+  assert.match(jsonRes.headers.get('content-type'), /application\/json/);
+  assert.match(jsonRes.headers.get('content-disposition'), /attachment; filename="zhixue-export-/);
+  const data = await jsonRes.json();
+  assert.equal(data.goal.title, '导出目标');
+  assert.equal(data.blocks.length, 1);
+  assert.ok(data.exportedAt);
+
+  const csvRes = await fetch(base + '/api/export?format=csv', { headers: { Cookie: cookie } });
+  assert.equal(csvRes.status, 200);
+  assert.match(csvRes.headers.get('content-type'), /text\/csv/);
+  const csv = await csvRes.text();
+  assert.ok(csv.includes('日期,开始,结束,任务'));
+  assert.ok(csv.includes('导出任务'));
+});
+
+test('部分完成：按实际投入扣减剩余工时，下次排程只排剩余量', async () => {
+  const { cookie } = await register('partial@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  const item = await call('POST', '/api/items', { title: '长任务', subject: 'major', estimateMin: 120, weight: 5 }, cookie);
+  const itemId = item.json.item.id;
+  assert.equal(item.json.item.remainingMin, 120);
+
+  const gen1 = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const block = gen1.json.blocks[0];
+  assert.equal(block.endMin - block.startMin, 120);
+
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 60 }, cookie);
+  let state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.items.find((i) => i.id === itemId).remainingMin, 60);
+
+  const gen2 = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09' }, cookie);
+  assert.equal(gen2.json.blocks.length, 1);
+  assert.equal(gen2.json.blocks[0].endMin - gen2.json.blocks[0].startMin, 60);
+});
+
+test('跨周去重：已在其它周排定未完成的任务不会重复排入', async () => {
+  const { cookie } = await register('carry@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'major', estimateMin: 120, weight: 5 }, cookie);
+
+  const week1 = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  assert.ok(week1.json.blocks.length > 0);
+
+  const week2 = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09' }, cookie);
+  assert.equal(week2.json.blocks.length, 0, '未完成任务不应在下一周重复出现');
+
+  // 完成后剩余工时为 0，也不再排入
+  const block = week1.json.blocks[0];
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 120 }, cookie);
+  const week3 = await call('POST', '/api/plan/generate', { weekStart: '2026-11-16' }, cookie);
+  assert.equal(week3.json.blocks.length, 0);
+});
+
+test('注销账号：密码校验、数据级联删除、会话失效', async () => {
+  const { cookie } = await register('delete@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
+
+  const wrong = await call('DELETE', '/api/account', { password: 'not-my-password' }, cookie);
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.json.error.code, 'E1023');
+
+  const ok = await call('DELETE', '/api/account', { password: 'password123' }, cookie);
+  assert.equal(ok.status, 200);
+
+  const after = await call('GET', '/api/state', null, cookie);
+  assert.equal(after.status, 401);
+
+  const relogin = await call('POST', '/api/auth/login', { email: 'delete@test.dev', password: 'password123' });
+  assert.equal(relogin.status, 401, '注销后不应还能登录');
 });
 
 test('登出后会话失效', async () => {

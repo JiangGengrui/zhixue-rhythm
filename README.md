@@ -25,7 +25,7 @@ npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
 | 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS token，无 UI 框架 |
 | 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出即失效 |
-| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 30 条自动化用例 + 12 步浏览器验收 |
+| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 34 条自动化用例 + 12 步浏览器验收 |
 | 同构 | esbuild 把 `src/domain/engine.ts` 打成 `server/engine.generated.mjs` | 排程与周报前后端共用**同一份源码**，不存在两套算法 |
 
 > 说明：架构文档原定 Go + Postgres。当前环境无 Go/Postgres，为满足"一条命令可运行"，后端先用 Node + SQLite 实现，**接口契约与领域规则保持不变**，后续平移 Go 时前端无需改动。
@@ -59,10 +59,12 @@ scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 | POST | `/api/items` | 添加计划项 |
 | DELETE | `/api/items/:id` | 删除计划项并级联清理其任务块 |
 | PUT | `/api/settings` | 每周可用时段、周起始日 |
-| POST | `/api/plan/generate` | 服务端生成某周计划（`from` 支持从今天起排，保留完成状态） |
+| POST | `/api/plan/generate` | 服务端生成某周计划：`from` 从今天起排；只补排没有块的任务，已完成记录不被覆盖；跨周已排任务不重复排 |
 | GET | `/api/report?week=` | 服务端计算周报（达成率/时长/偏差/归因） |
 | PUT | `/api/blocks` | 覆盖某周任务块（校验同日不重叠） |
-| PATCH | `/api/blocks/:id` | 打卡状态迁移，带 `opId` 幂等 |
+| PATCH | `/api/blocks/:id` | 打卡状态迁移，带 `opId` 幂等；完成时按实际投入扣减任务剩余工时 |
+| GET | `/api/export?format=json\|csv` | 导出全部数据（JSON）或任务记录（CSV，带 BOM） |
+| DELETE | `/api/account` | 注销账号：校验密码、级联删除数据、会话失效 |
 
 错误统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。
 
@@ -70,7 +72,7 @@ scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 30 条通过（引擎 19 + 接口 11） |
+| `npm test` | 34 条通过（引擎 19 + 接口 15） |
 | `npx tsc --noEmit` | 0 错误 |
 | `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
 | `node scripts/e2e.mjs` | 12 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 打卡 → 服务端周报 → 刷新保持 → 改设置 → 按新容量重排 → 登出 → 控制台零报错 |
@@ -81,7 +83,6 @@ scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 
 1. 无找回密码 / 邮箱验证流程。
 2. 无离线队列与多端冲突合并（当前以服务端为准，后写覆盖）。
-3. 计划项没有"部分完成"概念：一项任务只能整体打卡；长任务需拆成多条。
-4. 排程是单周贪心装箱，不跨周回溯；装不下的项只提示顺延，需要手动到下周生成。
-5. 无数据导出与账号注销入口（接口层可加，UI 未做）。
-6. 后端为 Node + SQLite（环境无 Go/Postgres），契约已固化以便后续平移。
+3. 重排只补排"本周还没有块"的任务；已排任务若想改时间，目前只能删除后重新生成。
+4. 装不下的任务不在同一周内自动拆分到多天，需等下一周剩余工时自然进入排程。
+5. 后端为 Node + SQLite（环境无 Go/Postgres），契约已固化以便后续平移。
