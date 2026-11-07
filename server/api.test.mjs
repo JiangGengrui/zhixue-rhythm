@@ -445,6 +445,45 @@ test('恢复码：注册下发、错误码拒绝、正确重置并轮换', async
   assert.equal(rotated.status, 200);
 });
 
+test('主页公开接口：留言免登录读写与校验', async () => {
+  const empty = await call('GET', '/api/feedback?limit=5');
+  assert.equal(empty.status, 200, '未登录应能读取留言');
+  assert.ok(Array.isArray(empty.json.messages));
+
+  const post = await call('POST', '/api/feedback', { nickname: '路人', content: '希望支持考公模板' });
+  assert.equal(post.status, 200, JSON.stringify(post.json));
+  assert.equal(post.json.message.nickname, '路人');
+
+  const after = await call('GET', '/api/feedback');
+  assert.equal(after.json.messages[0].content, '希望支持考公模板');
+
+  const anonymous = await call('POST', '/api/feedback', { content: '匿名也可以留言' });
+  assert.equal(anonymous.status, 200);
+  assert.equal(anonymous.json.message.nickname, null);
+
+  const blank = await call('POST', '/api/feedback', { content: '   ' });
+  assert.equal(blank.status, 400);
+  assert.equal(blank.json.error.code, 'E1031');
+
+  const tooLong = await call('POST', '/api/feedback', { content: 'x'.repeat(501) });
+  assert.equal(tooLong.status, 400);
+  assert.equal(tooLong.json.error.code, 'E1031');
+
+  const longNick = await call('POST', '/api/feedback', { nickname: 'x'.repeat(31), content: 'hi' });
+  assert.equal(longNick.status, 400);
+  assert.equal(longNick.json.error.code, 'E1032');
+});
+
+test('访问计数：POST 自增，GET 只读', async () => {
+  const before = await call('GET', '/api/visit');
+  assert.equal(before.status, 200);
+  const start = before.json.count;
+  const inc = await call('POST', '/api/visit');
+  assert.equal(inc.json.count, start + 1);
+  const again = await call('GET', '/api/visit');
+  assert.equal(again.json.count, start + 1, 'GET 不应改变计数');
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

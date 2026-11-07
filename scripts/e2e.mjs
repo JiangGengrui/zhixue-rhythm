@@ -136,7 +136,21 @@ async function main() {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
 
-  const base = `http://127.0.0.1:${PORT}/`;
+  const origin = `http://127.0.0.1:${PORT}`;
+  const base = `${origin}/app.html`;
+
+  // 0. 根路径必须是产品主页，且「进入」指向学习空间
+  await cdp.send('Page.navigate', { url: `${origin}/` });
+  await sleep(1200);
+  let home = await cdp.text();
+  assert(home.includes('计划会变化'), '根路径不是产品主页');
+  assert(home.includes('四个空间'), '主页缺少功能介绍');
+  await cdp.shot('00-home');
+  await cdp.click('进入');
+  await sleep(1500);
+  home = await cdp.text();
+  assert(home.includes('登录') || home.includes('还没有目标'), '主页「进入」未跳转到学习空间');
+  console.log('✓ 主页存在，「进入」可跳转到应用');
 
   // 1. 未登录：应看到登录页
   await cdp.send('Page.navigate', { url: `${base}#report` });
@@ -181,6 +195,33 @@ async function main() {
   body = await cdp.text();
   assert(body.includes('本周可用') && body.includes('已排计划'), '周视图统计缺失');
   assert(!body.includes('NaN'), '周视图出现 NaN');
+  // 若今天之后已无可排时段（如周日），生成会为 0 块：直接从本周一起排，保证后续步骤有任务
+  const adjustCount = await cdp.eval(`return document.querySelectorAll('.slot-edit').length;`);
+  if (adjustCount === 0) {
+    const filled = await cdp.eval(`
+      const pad = (n) => String(n).padStart(2, '0');
+      const now = new Date();
+      const dow = (now.getDay() + 6) % 7;
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
+      const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      const start = iso(monday);
+      const res = await fetch('/api/plan/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weekStart: start, from: start }),
+      });
+      const data = await res.json();
+      return Array.isArray(data.blocks) ? data.blocks.length : 0;
+    `);
+    assert(filled > 0, '本周已无可排时段，且补排后仍没有任务块');
+    await cdp.send('Page.reload');
+    await sleep(1800);
+    await cdp.click('周视图');
+    await sleep(800);
+    const retry = await cdp.eval(`return document.querySelectorAll('.slot-edit').length;`);
+    assert(retry > 0, '补齐本周计划后仍没有可调整的任务');
+  }
+
   await cdp.shot('04-week');
   console.log('✓ 周计划已生成并落库');
 

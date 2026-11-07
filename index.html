@@ -1,14 +1,571 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f5f7f5" />
-    <meta name="description" content="智学节律：把长期目标拆到今天，并在偏离计划时给出可执行的调整。" />
-    <title>智学节律 · 让计划跟得上现实</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7f5">
+  <meta name="description" content="智学节律：让计划跟得上现实。面向长期学习者的计划与复盘空间。">
+  <title>智学节律 · 产品主页</title>
+  <style>
+    :root{
+      --ink:#202b28;--muted:#7b8882;--soft:#a0aaa5;--line:#e9eeea;
+      --paper:#fff;--canvas:#f5f7f5;--green:#277a63;--green-2:#4f9b7e;
+      --green-bg:#eaf4ee;--mint:#dceee3;--amber:#be8750;--amber-bg:#fbf3e8;
+      --navy:#374e47;--shadow:0 8px 28px rgba(38,60,49,.045);--radius:16px;
+      --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--canvas);color:var(--ink);font:15px/1.65 var(--sans);-webkit-font-smoothing:antialiased}
+    a{color:inherit}
+    .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+
+    /* ── 顶部导航 ── */
+    .site-nav{position:sticky;top:0;z-index:10;background:rgba(245,247,245,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+    .site-nav .wrap{display:flex;align-items:center;gap:12px;height:64px}
+    .brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+    .brand-mark{width:32px;height:32px;border-radius:10px;background:#e5f1e9;display:flex;align-items:center;justify-content:center;gap:2px;transform:rotate(-8deg);flex:none}
+    .brand-mark i{width:3px;border-radius:4px;background:#43886b;display:block}
+    .brand-mark i:nth-child(1){height:10px}
+    .brand-mark i:nth-child(2){height:17px}
+    .brand-mark i:nth-child(3){height:12px}
+    .brand strong{display:block;font-size:16px;letter-spacing:.035em;line-height:1.2}
+    .brand small{display:block;font-size:10px;color:#89968e;letter-spacing:.03em}
+    .site-nav .spacer{flex:1}
+    .site-nav .links{display:flex;gap:22px;font-size:13px;color:var(--muted)}
+    .site-nav .links a{text-decoration:none;transition:color .18s}
+    .site-nav .links a:hover{color:var(--green)}
+
+    /* ── Hero ── */
+    .hero{padding:88px 0 72px;text-align:center;position:relative;overflow:hidden}
+    .hero .wrap{position:relative;z-index:1}
+
+    /* 底层动效 1：渐变呼吸 Blob */
+    .hero-bg{position:absolute;inset:0;pointer-events:none;z-index:0}
+    .blob{position:absolute;filter:blur(70px);opacity:.6;will-change:transform,border-radius;animation:blobMorph 20s ease-in-out infinite alternate}
+    .blob-a{width:480px;height:480px;left:-120px;top:-140px;background:radial-gradient(closest-side,#dceee3,#dceee300);animation-duration:22s}
+    .blob-b{width:520px;height:520px;right:-160px;top:40px;background:radial-gradient(closest-side,#cfe8da,#cfe8da00);animation-duration:26s;animation-delay:-8s}
+    .blob-c{width:420px;height:420px;left:32%;bottom:-200px;background:radial-gradient(closest-side,#fbf3e8,#fbf3e800);opacity:.75;animation-duration:30s;animation-delay:-16s}
+    @keyframes blobMorph{
+      0%{border-radius:62% 38% 55% 45%/50% 62% 38% 55%;transform:translate(0,0) scale(1)}
+      33%{border-radius:45% 55% 40% 60%/58% 42% 60% 40%;transform:translate(3%,-4%) scale(1.07)}
+      66%{border-radius:58% 42% 62% 38%/42% 56% 44% 58%;transform:translate(-4%,3%) scale(.95)}
+      100%{border-radius:50% 50% 45% 55%/56% 44% 52% 48%;transform:translate(2%,2%) scale(1.04)}
+    }
+
+    /* 底层动效 2：轨道星点 */
+    .orbit-ring{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);border:1px dashed rgba(39,122,99,.14);border-radius:50%}
+    .ring-1{width:640px;height:400px}
+    .ring-2{width:900px;height:560px}
+    .ring-3{width:1160px;height:700px}
+    .orbit-dot{position:absolute;left:0;top:0;width:9px;height:9px;border-radius:50%;opacity:.75;will-change:transform}
+    .orbit-dot.d1{background:#4f9b7e;box-shadow:0 0 14px rgba(79,155,126,.65)}
+    .orbit-dot.d2{background:#be8750;box-shadow:0 0 12px rgba(190,135,80,.5);width:7px;height:7px}
+    .orbit-dot.d3{background:#7a5e94;box-shadow:0 0 12px rgba(122,94,148,.45);width:6px;height:6px}
+
+    /* 底层动效 3：文字 Morph（标语关键词轮换） */
+    .hero h1 em{font-style:normal;color:var(--green);display:inline-block;text-align:left;vertical-align:bottom;transition:width .55s cubic-bezier(.6,0,.25,1)}
+    .word-morph{display:inline-block;transition:opacity .45s ease,filter .45s ease,transform .45s ease}
+    .word-morph.is-swapping{opacity:0;filter:blur(7px);transform:translateY(.28em) scale(.96)}
+    .word-measure{position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none}
+
+    .hero-badge{display:inline-flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:12px;color:var(--muted);box-shadow:var(--shadow);margin-bottom:26px;position:relative;z-index:1}
+    .hero-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--green-2)}
+    .hero h1{font-size:clamp(30px,5vw,46px);line-height:1.22;margin:0 0 18px;letter-spacing:.01em}
+    .hero .lede{max-width:560px;margin:0 auto 36px;color:var(--muted);font-size:16px}
+    .cta-row{display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap}
+    .btn-enter{display:inline-flex;align-items:center;gap:10px;background:var(--green);color:#fff;text-decoration:none;font-size:15px;font-weight:650;padding:14px 34px;border-radius:12px;box-shadow:0 10px 24px rgba(39,122,99,.28);transition:.2s ease}
+    .btn-enter:hover{background:#1f6551;transform:translateY(-1px);box-shadow:0 14px 28px rgba(39,122,99,.34)}
+    .btn-enter .arrow{transition:transform .2s}
+    .btn-enter:hover .arrow{transform:translateX(3px)}
+    .btn-ghost{display:inline-flex;align-items:center;gap:8px;color:var(--muted);text-decoration:none;font-size:14px;padding:13px 22px;border-radius:12px;border:1px solid var(--line);background:var(--paper);transition:.2s}
+    .btn-ghost:hover{color:var(--green);border-color:var(--mint)}
+    .hero-note{margin-top:22px;font-size:12px;color:var(--soft)}
+
+    /* ── 特性区 ── */
+    .features{padding:26px 0 84px}
+    .section-kicker{font-size:10px;font-weight:650;letter-spacing:.14em;text-transform:uppercase;color:#a4ada7;text-align:center;margin-bottom:10px}
+    .features h2{text-align:center;font-size:26px;margin:0 0 8px}
+    .features .sub{text-align:center;color:var(--muted);margin:0 auto 40px;max-width:480px}
+    .feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+    .feature-card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:24px 20px;box-shadow:var(--shadow);transition:.2s ease}
+    .feature-card:hover{transform:translateY(-3px);border-color:var(--mint)}
+    .feature-icon{width:40px;height:40px;border-radius:11px;background:var(--green-bg);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:14px}
+    .feature-card:nth-child(2) .feature-icon{background:var(--amber-bg);color:var(--amber)}
+    .feature-card:nth-child(3) .feature-icon{background:#eef1f6;color:#5b7290}
+    .feature-card:nth-child(4) .feature-icon{background:#f3eef7;color:#7a5e94}
+    .feature-card h3{margin:0 0 6px;font-size:15px}
+    .feature-card p{margin:0;font-size:12.5px;color:var(--muted)}
+
+    /* ── 理念区 ── */
+    .belief{background:var(--paper);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:64px 0}
+    .belief .wrap{display:grid;grid-template-columns:1.1fr 1fr;gap:48px;align-items:center}
+    .belief h2{font-size:24px;margin:0 0 14px}
+    .belief p{color:var(--muted);margin:0 0 12px}
+    .belief-points{display:grid;gap:14px}
+    .belief-point{display:flex;gap:12px;align-items:flex-start;background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+    .belief-point .spark{color:var(--green);font-size:16px;line-height:1.4}
+    .belief-point strong{display:block;font-size:14px}
+    .belief-point small{color:var(--muted);font-size:12.5px}
+
+    /* ── 底部 CTA ── */
+    .final-cta{padding:80px 0 92px;text-align:center}
+    .final-cta-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:36px;align-items:center;text-align:left}
+    .final-cta-copy h2{font-size:26px;margin:0 0 10px}
+    .final-cta-copy p{color:var(--muted);margin:0 0 30px}
+    .lanyard-stage{position:relative;height:380px;width:100%;max-width:340px;justify-self:center;touch-action:pan-y;cursor:grab}
+    .lanyard-stage:active{cursor:grabbing}
+    .lanyard-stage canvas{display:block;width:100%;height:100%}
+    @media(max-width:760px){
+      .final-cta-grid{grid-template-columns:1fr;text-align:center;gap:20px}
+      .lanyard-stage{height:300px;order:-1}
+    }
+
+    /* TiltedCard：3D 倾斜卡（ReactBits 移植） */
+    .tilt-card{position:relative;transform-style:preserve-3d;transition:transform .22s cubic-bezier(.22,.61,.36,1);will-change:transform}
+    .tilt-card.is-tilting{transition:transform .05s linear}
+    .tilt-glare{position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;z-index:3;transition:opacity .28s ease;background:radial-gradient(220px circle at var(--gx,50%) var(--gy,50%),rgba(255,255,255,.85),rgba(255,255,255,0) 60%);mix-blend-mode:soft-light}
+    .tilt-card:hover .tilt-glare{opacity:1}
+    .magnet-el{will-change:transform}
+    @media(prefers-reduced-motion:reduce){.tilt-card,.tilt-glare{transition:none}}
+
+    /* ── 访客留言反馈区 ── */
+    .feedback{background:var(--paper);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:64px 0}
+    .feedback-inner{max-width:680px;margin:0 auto}
+    .feedback h2{text-align:center;font-size:24px;margin:0 0 8px}
+    .feedback .sub{text-align:center;color:var(--muted);margin:0 0 32px}
+    .feedback-form{background:var(--canvas);border:1px solid var(--line);border-radius:var(--radius);padding:20px;display:grid;gap:12px}
+    .feedback-form input[type=text],.feedback-form textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);font:inherit;padding:11px 13px;resize:vertical}
+    .feedback-form input:focus,.feedback-form textarea:focus{outline:2px solid var(--mint);outline-offset:0;border-color:var(--green-2)}
+    .feedback-form textarea{min-height:88px}
+    .feedback-form-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    .feedback-form-foot small{color:var(--soft);flex:1;min-width:140px}
+    .btn-submit{background:var(--green);color:#fff;border:0;border-radius:10px;font:inherit;font-weight:650;padding:10px 22px;cursor:pointer;transition:.2s}
+    .btn-submit:hover{background:#1f6551}
+    .btn-submit[disabled]{opacity:.55;cursor:not-allowed}
+    .form-tip{font-size:12.5px;min-height:18px}
+    .form-tip.ok{color:var(--green)}
+    .form-tip.err{color:#b36c62}
+    .message-list{margin-top:28px;display:grid;gap:12px}
+    .message-card{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+    .message-head{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+    .message-head strong{font-size:13.5px}
+    .message-head time{font-size:11px;color:var(--soft)}
+    .message-card p{margin:0;font-size:13.5px;color:#4a5751;word-break:break-word;white-space:pre-wrap}
+    .message-empty{color:var(--soft);font-size:13px;text-align:center;padding:18px 0}
+    .message-loading{color:var(--soft);font-size:13px;text-align:center;padding:18px 0}
+    .message-error{color:#b36c62;font-size:13px;text-align:center;padding:18px 0}
+    .final-cta h2{font-size:26px;margin:0 0 10px}
+    .final-cta p{color:var(--muted);margin:0 0 30px}
+    .site-footer{border-top:1px solid var(--line);padding:24px 0 28px;font-size:12px;color:var(--soft);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+    @media(max-width:860px){
+      .feature-grid{grid-template-columns:1fr 1fr}
+      .belief .wrap{grid-template-columns:1fr;gap:28px}
+      .site-nav .links{display:none}
+      .hero{padding:64px 0 56px}
+      .orbit-ring,.orbit-dot{display:none}
+    }
+    @media(max-width:520px){
+      .feature-grid{grid-template-columns:1fr}
+      .cta-row{flex-direction:column}
+      .btn-enter,.btn-ghost{width:100%;justify-content:center}
+      .site-footer{justify-content:center;text-align:center}
+    }
+    @media(prefers-reduced-motion:reduce){
+      .blob{animation:none}
+      .hero h1 em,.word-morph{transition:none}
+    }
+  </style>
+</head>
+<body>
+
+  <header class="site-nav">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="智学节律主页">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>智学节律</strong><small>让计划跟得上现实</small></span>
+      </a>
+      <span class="spacer"></span>
+      <nav class="links" aria-label="页面导览">
+        <a href="#features">产品功能</a>
+        <a href="#belief">设计理念</a>
+        <a href="app.html">进入产品</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="blob blob-a"></div>
+        <div class="blob blob-b"></div>
+        <div class="blob blob-c"></div>
+        <div class="orbit-ring ring-1" data-rx="320" data-ry="200"></div>
+        <div class="orbit-ring ring-2" data-rx="450" data-ry="280"></div>
+        <div class="orbit-ring ring-3" data-rx="580" data-ry="350"></div>
+        <div class="orbit-dot d1" data-speed="0.30" data-phase="0"></div>
+        <div class="orbit-dot d2" data-speed="-0.22" data-phase="2.1"></div>
+        <div class="orbit-dot d3" data-speed="0.16" data-phase="4.4"></div>
+      </div>
+      <div class="wrap">
+        <span class="hero-badge"><span class="dot"></span>面向长期学习者的计划与复盘空间</span>
+        <h1>计划会变化，<br><em id="morph-word"><span class="word-morph" id="morph-word-text">节律</span></em>帮你回到正轨</h1>
+        <p class="lede">智学节律把长期目标拆成每天可执行的三件事，用周视图留出弹性，用周报复盘告诉你时间去了哪里——让计划跟得上现实。</p>
+        <div class="cta-row">
+          <a class="btn-enter" href="app.html">进入 <span class="arrow">→</span></a>
+          <a class="btn-ghost" href="#features">先看看它能做什么</a>
+        </div>
+        <p class="hero-note">免费使用 · 注册后数据按账号隔离</p>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="wrap">
+        <div class="section-kicker">PRODUCT FEATURES</div>
+        <h2>四个空间，覆盖学习的完整循环</h2>
+        <p class="sub">从目标到每一天，再从每一天回到目标，每一步都知道为什么。</p>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon">◷</div>
+            <h3>今日</h3>
+            <p>每天只聚焦三件事，配合时间轴与弹性时段，给突发情况留余地。</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">⌘</div>
+            <h3>目标拆解</h3>
+            <p>把长期目标拆成阶段与里程碑，用验收标准衡量每一步是否真的完成。</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">▦</div>
+            <h3>周视图</h3>
+            <p>一周任务一眼看全，时间容量与缓冲空间清晰可见，安排不再排满。</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">⌁</div>
+            <h3>周报复盘</h3>
+            <p>看见真实的达成率与偏差来源，把复盘变成一条下周可执行的建议。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="belief" id="belief">
+      <div class="wrap">
+        <div>
+          <h2>计划不是约束，<br>是帮你回到正轨的路标。</h2>
+          <p>传统计划工具追求"全部完成"，一旦落下一项就让人想放弃。智学节律从设计之初就承认现实会变化：估时会偏、会被打断、会有临时的事。</p>
+          <p>它不追问"你为什么没做完"，而是告诉你"偏差从哪里来、下一步怎么调得更舒服"。</p>
+        </div>
+        <div class="belief-points">
+          <div class="belief-point"><span class="spark">✳</span><div><strong>留白也是计划的一部分</strong><small>每周自动预留弹性时间，应对任务超时与突发情况。</small></div></div>
+          <div class="belief-point"><span class="spark">✦</span><div><strong>按自己的节奏向前</strong><small>用节律提醒代替deadline压迫，完成两件事也是进展。</small></div></div>
+          <div class="belief-point"><span class="spark">⌁</span><div><strong>复盘为了更好的下一步</strong><small>归因计划偏差，产出一条可执行的建议，而非焦虑清单。</small></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="feedback" id="feedback">
+      <div class="wrap feedback-inner">
+        <h2>留下你的想法</h2>
+        <p class="sub">对智学节律的期待、建议或疑问，都会被认真记录。</p>
+        <form class="feedback-form" id="feedback-form">
+          <input type="text" id="fb-nickname" maxlength="30" placeholder="怎么称呼你？（可留空，将显示为「访客」）" autocomplete="off">
+          <textarea id="fb-content" maxlength="500" placeholder="写下你的留言（1—500 字）…" required></textarea>
+          <div class="feedback-form-foot">
+            <small>提交即表示同意留言公开展示 · 数据保存在云端数据库</small>
+            <button class="btn-submit" type="submit" id="fb-submit">提交留言</button>
+          </div>
+          <div class="form-tip" id="fb-tip" role="status"></div>
+        </form>
+        <div class="message-list" id="message-list" aria-live="polite">
+          <div class="message-loading">正在加载留言…</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="wrap final-cta-grid">
+        <div class="final-cta-copy">
+          <h2>现在，进入你的学习空间</h2>
+          <p>登录后即可创建目标、生成周计划、打卡并查看周报。</p>
+          <a class="btn-enter" href="app.html">进入 <span class="arrow">→</span></a>
+        </div>
+        <div class="lanyard-stage" id="lanyard-stage" aria-hidden="true"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <span>智学节律 · 让计划跟得上现实</span>
+      <span>留言与访问数据保存在服务端</span>
+      <span id="visit-count" aria-label="累计访问次数"></span>
+    </div>
+  </footer>
+
+  <script>
+    (function(){
+      "use strict";
+      var list = document.getElementById("message-list");
+      var form = document.getElementById("feedback-form");
+      var nickEl = document.getElementById("fb-nickname");
+      var contentEl = document.getElementById("fb-content");
+      var tip = document.getElementById("fb-tip");
+      var submitBtn = document.getElementById("fb-submit");
+
+      function fmtTime(iso){
+        var d = new Date(iso);
+        if (isNaN(d)) return "";
+        var p = function(n){ return (n < 10 ? "0" : "") + n; };
+        return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + p(d.getHours()) + ":" + p(d.getMinutes());
+      }
+
+      function renderMessages(rows){
+        if (!rows.length) {
+          list.innerHTML = '<div class="message-empty">还没有留言，来做第一个说想法的人吧。</div>';
+          return;
+        }
+        list.innerHTML = "";
+        rows.forEach(function(r){
+          var card = document.createElement("article");
+          card.className = "message-card";
+          var head = document.createElement("div");
+          head.className = "message-head";
+          var name = document.createElement("strong");
+          name.textContent = (r.nickname && r.nickname.trim()) ? r.nickname.trim() : "访客";
+          var time = document.createElement("time");
+          time.textContent = fmtTime(r.createdAt || r.created_at);
+          head.appendChild(name); head.appendChild(time);
+          var body = document.createElement("p");
+          body.textContent = r.content;
+          card.appendChild(head); card.appendChild(body);
+          list.appendChild(card);
+        });
+      }
+
+      function loadMessages(){
+        fetch("/api/feedback?limit=8", { headers: { Accept: "application/json" } })
+          .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+          .then(function(data){ renderMessages(data.messages || []); })
+          .catch(function(){
+            list.innerHTML = '<div class="message-error">网络异常，留言暂时加载不出来。</div>';
+          });
+      }
+      loadMessages();
+
+      form.addEventListener("submit", function(ev){
+        ev.preventDefault();
+        var content = contentEl.value.trim();
+        var nickname = nickEl.value.trim();
+        if (!content) { tip.className = "form-tip err"; tip.textContent = "请先写下留言内容。"; return; }
+        if (content.length > 500) { tip.className = "form-tip err"; tip.textContent = "留言不能超过 500 字。"; return; }
+        submitBtn.disabled = true;
+        tip.className = "form-tip"; tip.textContent = "正在提交…";
+        fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nickname: nickname || null, content: content })
+        }).then(function(r){
+          return r.json().then(function(d){ return { ok: r.ok, data: d }; });
+        }).then(function(res){
+          submitBtn.disabled = false;
+          if (!res.ok) {
+            tip.className = "form-tip err";
+            tip.textContent = (res.data && res.data.error && res.data.error.message)
+              ? res.data.error.message
+              : "提交失败，请稍后重试。";
+            return;
+          }
+          form.reset();
+          tip.className = "form-tip ok";
+          tip.textContent = "提交成功，感谢你的反馈！";
+          loadMessages();
+        }).catch(function(){
+          submitBtn.disabled = false;
+          tip.className = "form-tip err";
+          tip.textContent = "网络异常，请检查网络后重试。";
+        });
+      });
+
+      /* 访问计数：每个浏览器会话只记一次，防止刷新灌水 */
+      (function countVisit(){
+        var el = document.getElementById("visit-count");
+        if (!el) return;
+        function show(n){
+          if (typeof n === "number") el.textContent = "累计访问 " + n + " 次";
+        }
+        var recorded = false;
+        try { recorded = sessionStorage.getItem("pv_recorded") === "1"; } catch (e) {}
+        if (recorded) {
+          fetch("/api/visit").then(function(r){ return r.json(); }).then(function(d){ show(d.count); }).catch(function(){});
+          return;
+        }
+        try { sessionStorage.setItem("pv_recorded", "1"); } catch (e) {}
+        fetch("/api/visit", { method: "POST" })
+          .then(function(r){ return r.json(); })
+          .then(function(d){ show(d.count); })
+          .catch(function(){});
+      })();
+    })();
+  </script>
+
+  <script>
+    (function(){
+      "use strict";
+      var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      /* ── 底层动效 3：标语关键词 Morph 轮换 ── */
+      var WORDS = ["节律", "节奏", "路标"];
+      var wordEl = document.getElementById("morph-word");
+      var textEl = document.getElementById("morph-word-text");
+      var measure = document.createElement("span");
+      measure.className = "word-measure";
+      var h1 = wordEl.closest("h1");
+      h1.appendChild(measure);
+      var idx = 0;
+
+      function fitWidth(word){
+        var cs = getComputedStyle(wordEl);
+        measure.style.fontWeight = cs.fontWeight;
+        measure.style.fontSize = cs.fontSize;
+        measure.style.fontFamily = cs.fontFamily;
+        measure.style.letterSpacing = cs.letterSpacing;
+        measure.textContent = word;
+        wordEl.style.width = measure.getBoundingClientRect().width + "px";
+      }
+      fitWidth(WORDS[0]);
+
+      /* ── 底层动效 2：轨道星点（参数化椭圆运动） ── */
+      var bg = document.querySelector(".hero-bg");
+      var dots = Array.prototype.slice.call(bg.querySelectorAll(".orbit-dot"));
+      var rings = Array.prototype.slice.call(bg.querySelectorAll(".orbit-ring"));
+      var k = 1;
+
+      function fitOrbits(){
+        k = Math.min(1, bg.clientWidth / 1200);
+        rings.forEach(function(r){
+          r.style.transform = "translate(-50%,-50%) scale(" + k + ")";
+        });
+      }
+      fitOrbits();
+      window.addEventListener("resize", function(){
+        fitWidth(WORDS[idx]);
+        fitOrbits();
+      });
+
+      if(!reduced){
+        setInterval(function(){
+          textEl.classList.add("is-swapping");
+          setTimeout(function(){
+            idx = (idx + 1) % WORDS.length;
+            fitWidth(WORDS[idx]);
+            textEl.textContent = WORDS[idx];
+            textEl.classList.remove("is-swapping");
+          }, 460);
+        }, 3400);
+      }
+
+      /* ── 底层动效 2：轨道星点（参数化椭圆运动） ── */
+      function tick(now){
+        var t = now / 1000;
+        var bw = bg.clientWidth;
+        var bh = bg.clientHeight;
+        var cx = bw / 2, cy = bh * 0.56;
+        for(var i = 0; i < dots.length; i++){
+          var d = dots[i];
+          var ring = bg.querySelector(d.dataset.ring || (".ring-" + (i + 1)));
+          if(!ring) continue;
+          var rx = ring.offsetWidth / 2 * k;
+          var ry = ring.offsetHeight / 2 * k;
+          var a = t * parseFloat(d.dataset.speed) + parseFloat(d.dataset.phase);
+          var x = cx + rx * Math.cos(a);
+          var y = cy + ry * Math.sin(a);
+          d.style.transform = "translate(" + x + "px," + y + "px) translate(-50%,-50%)";
+        }
+        requestAnimationFrame(tick);
+      }
+      if(!reduced && dots.length){
+        requestAnimationFrame(tick);
+      }
+    })();
+  </script>
+
+  <!-- 3D 物理交互：TiltedCard + Magnet（ReactBits 移植） -->
+  <script>
+    (function(){
+      "use strict";
+      var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var fine = window.matchMedia("(hover:hover) and (pointer:fine)").matches;
+      if(reduced) return;
+
+      /* TiltedCard：功能卡 3D 倾斜 + 光斑 */
+      if(fine){
+        document.querySelectorAll(".feature-card").forEach(function(el){
+          el.classList.add("tilt-card");
+          var glare = document.createElement("span");
+          glare.className = "tilt-glare";
+          glare.setAttribute("aria-hidden", "true");
+          el.appendChild(glare);
+
+          el.addEventListener("pointermove", function(event){
+            var r = el.getBoundingClientRect();
+            var px = (event.clientX - r.left) / r.width - .5;
+            var py = (event.clientY - r.top) / r.height - .5;
+            el.classList.add("is-tilting");
+            el.style.transform = "perspective(900px) rotateX(" + (-py * 7).toFixed(2) + "deg) rotateY(" + (px * 7).toFixed(2) + "deg) translateY(-3px) scale(1.01)";
+            el.style.setProperty("--gx", ((event.clientX - r.left) / r.width * 100).toFixed(1) + "%");
+            el.style.setProperty("--gy", ((event.clientY - r.top) / r.height * 100).toFixed(1) + "%");
+          });
+          el.addEventListener("pointerleave", function(){
+            el.classList.remove("is-tilting");
+            el.style.transform = "";
+          });
+        });
+      }
+
+      /* Magnet：主按钮弹簧磁吸 */
+      if(fine){
+        var nodes = [].map.call(document.querySelectorAll(".btn-enter, #fb-submit"), function(el){
+          el.classList.add("magnet-el");
+          return { el: el, x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0 };
+        });
+        if(nodes.length){
+          window.addEventListener("pointermove", function(event){
+            nodes.forEach(function(n){
+              var r = n.el.getBoundingClientRect();
+              var dx = event.clientX - (r.left + r.width / 2);
+              var dy = event.clientY - (r.top + r.height / 2);
+              var dist = Math.hypot(dx, dy);
+              var radius = Math.max(r.width, 96) / 2 + 70;
+              if(dist < radius){
+                var f = 1 - dist / radius;
+                n.tx = Math.max(-10, Math.min(10, dx * f * .3));
+                n.ty = Math.max(-9, Math.min(9, dy * f * .36));
+              } else { n.tx = 0; n.ty = 0; }
+            });
+          }, { passive: true });
+
+          (function tick(){
+            nodes.forEach(function(n){
+              n.vx += (n.tx - n.x) * .18;
+              n.vy += (n.ty - n.y) * .18;
+              n.vx *= .74; n.vy *= .74;
+              n.x += n.vx; n.y += n.vy;
+              if(n.tx === 0 && Math.abs(n.x) < .08 && Math.abs(n.y) < .08 && Math.abs(n.vx) < .05){
+                n.x = 0; n.y = 0; n.vx = 0; n.vy = 0;
+                if(n.el.style.transform) n.el.style.transform = "";
+                return;
+              }
+              n.el.style.transform = "translate(" + n.x.toFixed(2) + "px," + n.y.toFixed(2) + "px)";
+            });
+            requestAnimationFrame(tick);
+          })();
+        }
+      }
+    })();
+  </script>
+
+  <script src="/three-effects.js" defer></script>
+</body>
 </html>

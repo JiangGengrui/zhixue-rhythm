@@ -115,6 +115,10 @@ export function createApi(db) {
     ),
     sessionsOfUser: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
     updatePassword: db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?'),
+    insertFeedback: db.prepare('INSERT INTO feedback (nickname, content, created_at) VALUES (?, ?, ?)'),
+    recentFeedback: db.prepare('SELECT id, nickname, content, created_at FROM feedback ORDER BY id DESC LIMIT ?'),
+    bumpVisit: db.prepare("INSERT INTO site_stats (key, value) VALUES ('visit', 1) ON CONFLICT(key) DO UPDATE SET value = value + 1"),
+    readVisit: db.prepare("SELECT value FROM site_stats WHERE key = 'visit'"),
     blocksByDate: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date = ?'),
     moveBlock: db.prepare('UPDATE blocks SET date = ?, start_min = ?, end_min = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     deleteBlock: db.prepare('DELETE FROM blocks WHERE id = ? AND user_id = ?'),
@@ -215,6 +219,38 @@ export function createApi(db) {
     },
 
     'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+
+    // 产品主页的公开接口：无需登录
+    'GET /api/feedback': ({ query }) => {
+      const raw = Number(query.get('limit') ?? 8);
+      const limit = Math.min(20, Math.max(1, Number.isFinite(raw) ? Math.trunc(raw) : 8));
+      return {
+        messages: q.recentFeedback.all(limit).map((row) => ({
+          id: row.id,
+          nickname: row.nickname,
+          content: row.content,
+          createdAt: row.created_at,
+        })),
+      };
+    },
+
+    'POST /api/feedback': ({ body, ip }) => {
+      if (!allowLogin(ip, 'feedback')) throw new HttpError(429, 'E2002', '提交过于频繁，请稍后再试');
+      const content = String(body?.content ?? '').trim();
+      const nicknameRaw = body?.nickname == null ? '' : String(body.nickname).trim();
+      assert(content.length >= 1 && content.length <= 500, 'E1031', '留言内容需为 1—500 字');
+      if (nicknameRaw) assert(nicknameRaw.length <= 30, 'E1032', '昵称不能超过 30 字');
+      const createdAt = nowISO();
+      q.insertFeedback.run(nicknameRaw || null, content, createdAt);
+      return { message: { nickname: nicknameRaw || null, content, createdAt } };
+    },
+
+    'GET /api/visit': () => ({ count: q.readVisit.get()?.value ?? 0 }),
+
+    'POST /api/visit': () => {
+      q.bumpVisit.run();
+      return { count: q.readVisit.get()?.value ?? 0 };
+    },
 
     'POST /api/auth/password': ({ user, body, res }) => {
       const current = String(body?.currentPassword ?? '');
@@ -505,7 +541,8 @@ export function createApi(db) {
     const key = `${method} ${path}`;
     const handler = handlers[key];
     if (!handler) return undefined;
-    const needsAuth = !key.startsWith('POST /api/auth/');
+    const PUBLIC = new Set(['POST /api/feedback', 'GET /api/feedback', 'POST /api/visit', 'GET /api/visit']);
+    const needsAuth = !key.startsWith('POST /api/auth/') && !PUBLIC.has(key);
     if (needsAuth) requireUser(ctx);
     return handler({ ...ctx, user: ctx.user, query: ctx.query ?? new URLSearchParams() });
   };

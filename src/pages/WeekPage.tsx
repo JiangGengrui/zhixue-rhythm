@@ -38,6 +38,13 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const shown = hasSaved ? saved : packed.blocks;
 
   const capacity = dates.reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0);
+  const today = todayISO();
+  const isCurrentWeek = weekStart === startOfWeek(today, state.settings.weekStart);
+  // 今天及之后还能排多少分钟（非本周时视为整周可用）
+  const remainingFromToday = isCurrentWeek
+    ? dates.filter((d) => d >= today).reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0)
+    : capacity;
+  const noRoomLeft = remainingFromToday === 0;
   const plannedMin = shown.reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const bufferMin = shown.filter((b) => b.isBuffer).reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const editing = saved.find((b) => b.id === editingId) ?? null;
@@ -99,7 +106,13 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           <Button
             variant="primary"
             onClick={() => {
-              void actions.generateWeek(weekStart).then(() => setNotice('已生成（只补排本周还没有块的任务）'));
+              void actions.generateWeek(weekStart).then((added) =>
+                setNotice(
+                  added > 0
+                    ? `新增 ${added} 个任务块`
+                    : '这一周没有可排的时段，未新增任务（可在「设置」调整每日可用时间）',
+                ),
+              );
             }}
           >
             {hasSaved ? '补排新任务' : '生成本周计划'}
@@ -107,6 +120,25 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           {notice && <span className="notice">{notice}</span>}
         </div>
       </Card>
+
+      {noRoomLeft && isCurrentWeek && (
+        <div className="hint-bar">
+          <span>
+            从今天起本周已没有可用时段（{WEEKDAY_LABEL[weekdayOf(today)]}及之后都是休息日），所以「生成」不会产出任务。
+          </span>
+          <Button
+            onClick={() => {
+              const next = addDays(weekStart, 7);
+              setWeekStart(next);
+              void actions.generateWeek(next).then((added) =>
+                setNotice(added > 0 ? `已为 ${next} 那周生成 ${added} 个任务块` : '下周也没有可用时段，请先到「设置」调整每日可用时间'),
+              );
+            }}
+          >
+            为下周生成
+          </Button>
+        </div>
+      )}
 
       {editing && (
         <Card
@@ -185,7 +217,8 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
                 ) : (
                   dayBlocks.map((b) => {
                     const item = itemMap.get(b.itemId);
-                    const movable = b.status === 'pending' || b.status === 'running';
+                    // 只有已落库的块才能调整；预览块点击无对象可改，不显示入口
+                    const movable = hasSaved && (b.status === 'pending' || b.status === 'running');
                     return (
                       <div
                         key={b.id}

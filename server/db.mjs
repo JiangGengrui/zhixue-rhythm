@@ -77,6 +77,20 @@ function migrate(db) {
       created_at TEXT NOT NULL,
       PRIMARY KEY (user_id, op_id)
     );
+
+    -- 产品主页留言：无需登录，公开可读
+    CREATE TABLE IF NOT EXISTS feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nickname TEXT,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    -- 站点统计（当前仅访问计数）
+    CREATE TABLE IF NOT EXISTS site_stats (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   // 增量迁移：任务剩余工时（老库补列，默认取预估工时）
