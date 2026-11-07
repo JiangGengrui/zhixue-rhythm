@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from './data/api';
+import { enqueue, isOfflineError, loadOps, removeOp } from './data/offlineQueue';
 import type { SessionUser } from './data/api';
 import { addDays, todayISO, weekDates } from './domain/date';
 import type { Block, BlockStatus, Goal, PlanItem, Settings } from './domain/types';
@@ -47,6 +48,7 @@ export interface Actions {
   ) => Promise<void>;
   seedDemo: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
+  flushOps: () => Promise<void>;
   moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
@@ -59,6 +61,7 @@ export function useAppState() {
   const [state, setState] = useState<AppState>(emptyState);
   const [error, setError] = useState<string | null>(null);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [pendingOps, setPendingOps] = useState<number>(() => loadOps().length);
 
   const load = useCallback(async () => {
     try {
@@ -187,16 +190,138 @@ export function useAppState() {
 
   const setBlockStatus = useCallback(
     async (id: string, status: BlockStatus, actualMin?: number, skipReason?: Block['skipReason']) => {
-      await run(async () => {
+      const before = state.blocks.find((b) => b.id === id);
+      // 先乐观更新，离线时界面也能立即反映
+      setState((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                status,
+                actualMin: status === 'done' ? actualMin ?? b.endMin - b.startMin : b.actualMin,
+                skipReason: status === 'skipped' ? skipReason ?? 'other' : undefined,
+              }
+            : b,
+        ),
+      }));
+
+      try {
         const res = await api.patchBlock(id, { status, actualMin, skipReason });
-        setState((prev) => ({
-          ...prev,
-          blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)),
-        }));
-      });
+        setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+        setError(null);
+      } catch (err) {
+        if (isOfflineError(err)) {
+          setPendingOps(
+            enqueue({ id: crypto.randomUUID(), kind: 'status', blockId: id, payload: { status, actualMin, skipReason } }).length,
+          );
+          setError('当前处于离线状态，打卡已暂存，联网后会自动同步');
+          return;
+        }
+        if (err instanceof ApiError && err.status === 401) {
+          setPhase('guest');
+          return;
+        }
+        setError(messageOf(err));
+        if (before) {
+          setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? before : b)) }));
+        }
+      }
     },
-    [run],
+    [state.blocks],
   );
+
+  const moveBlock = useCallback(
+    async (id: string, input: { date: string; startMin: number }) => {
+      const before = state.blocks.find((b) => b.id === id);
+      setState((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) =>
+          b.id === id ? { ...b, date: input.date, startMin: input.startMin, endMin: input.startMin + (b.endMin - b.startMin) } : b,
+        ),
+      }));
+      try {
+        const res = await api.moveBlock(id, input);
+        setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+        setError(null);
+      } catch (err) {
+        if (isOfflineError(err)) {
+          setPendingOps(enqueue({ id: crypto.randomUUID(), kind: 'move', blockId: id, payload: input }).length);
+          setError('当前处于离线状态，调整已暂存，联网后会自动同步');
+          return;
+        }
+        if (err instanceof ApiError && err.status === 401) {
+          setPhase('guest');
+          return;
+        }
+        setError(messageOf(err));
+        if (before) {
+          setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? before : b)) }));
+        }
+      }
+    },
+    [state.blocks],
+  );
+
+  const deleteBlock = useCallback(async (id: string) => {
+    const before = state.blocks;
+    setState((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
+    try {
+      await api.deleteBlock(id);
+      setError(null);
+    } catch (err) {
+      if (isOfflineError(err)) {
+        setPendingOps(enqueue({ id: crypto.randomUUID(), kind: 'delete', blockId: id, payload: {} }).length);
+        setError('当前处于离线状态，删除已暂存，联网后会自动同步');
+        return;
+      }
+      setError(messageOf(err));
+      setState((prev) => ({ ...prev, blocks: before }));
+    }
+  }, [state.blocks]);
+
+  /** 按入队顺序补传；服务端用 opId 幂等，重复提交不会重复计数 */
+  const flushOps = useCallback(async () => {
+    const ops = loadOps();
+    if (ops.length === 0) return;
+    for (const op of ops) {
+      try {
+        if (op.kind === 'status') {
+          await api.patchBlock(op.blockId, op.payload, op.id);
+        } else if (op.kind === 'move') {
+          await api.moveBlock(op.blockId, op.payload);
+        } else {
+          await api.deleteBlock(op.blockId).catch((err: unknown) => {
+            if (err instanceof ApiError && err.status === 404) return;
+            throw err;
+          });
+        }
+        setPendingOps(removeOp(op.id).length);
+      } catch (err) {
+        if (isOfflineError(err)) return; // 仍然离线，等下一次
+        if (err instanceof ApiError && (err.status === 400 || err.status === 404)) {
+          setPendingOps(removeOp(op.id).length); // 无效操作直接丢弃，避免卡死队列
+          continue;
+        }
+        return;
+      }
+    }
+    setError(null);
+    await load();
+  }, [load]);
+
+  useEffect(() => {
+    void flushOps();
+    const onOnline = () => void flushOps();
+    window.addEventListener('online', onOnline);
+    const timer = window.setInterval(() => {
+      if (loadOps().length > 0) void flushOps();
+    }, 20000);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.clearInterval(timer);
+    };
+  }, [flushOps]);
 
   const seedDemo = useCallback(async () => {
     await run(async () => {
@@ -221,20 +346,6 @@ export function useAppState() {
     });
   }, [run, load]);
 
-  const moveBlock = useCallback(async (id: string, input: { date: string; startMin: number }) => {
-    await run(async () => {
-      const res = await api.moveBlock(id, input);
-      setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
-    });
-  }, [run]);
-
-  const deleteBlock = useCallback(async (id: string) => {
-    await run(async () => {
-      await api.deleteBlock(id);
-      setState((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
-    });
-  }, [run]);
-
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
     await api.changePassword(currentPassword, newPassword);
   }, []);
@@ -250,10 +361,11 @@ export function useAppState() {
     error,
     state,
     recoveryCode,
+    pendingOps,
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
-      moveBlock, deleteBlock, changePassword,
+      moveBlock, deleteBlock, changePassword, flushOps,
     } satisfies Actions,
   };
 }

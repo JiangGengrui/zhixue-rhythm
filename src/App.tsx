@@ -80,7 +80,7 @@ function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }
 }
 
 export default function App() {
-  const { phase, error, state, actions, recoveryCode } = useAppState();
+  const { phase, error, state, actions, recoveryCode, pendingOps } = useAppState();
   const [tab, setTab] = useState<Tab>(() => {
     const h = location.hash.slice(1);
     return TABS.some((t) => t.key === h) ? (h as Tab) : 'today';
@@ -162,6 +162,11 @@ export default function App() {
         </nav>
 
         <div className="top-actions">
+          {pendingOps > 0 && (
+            <button type="button" className="offline-badge" onClick={() => void actions.flushOps()}>
+              离线 {pendingOps} 项待同步 · 重试
+            </button>
+          )}
           <span className="hint">
             {state.user?.name} · 本周 {weekBlocks.length} 项
           </span>

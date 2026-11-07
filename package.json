@@ -15,7 +15,8 @@
     "test:unit": "vitest run",
     "test:api": "npm run build:engine && node --test server/api.test.mjs",
     "test:e2e": "npm run build:engine && node scripts/e2e.mjs",
-    "build:engine": "esbuild src/domain/engine.ts --bundle --format=esm --platform=neutral --outfile=server/engine.generated.mjs --log-level=warning"
+    "build:engine": "esbuild src/domain/engine.ts --bundle --format=esm --platform=neutral --outfile=server/engine.generated.mjs --log-level=warning",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

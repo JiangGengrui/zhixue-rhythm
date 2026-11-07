@@ -236,6 +236,39 @@ async function main() {
   await cdp.shot('06-report');
   console.log('✓ 周报按真实记录计算');
 
+  // 6b. 离线打卡：断网仍可操作，恢复网络后补传
+  await cdp.click('今日');
+  await sleep(600);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+  });
+  await cdp.click('开始');
+  await cdp.click('完成');
+  await cdp.eval(`
+    const input = document.querySelector('.inline-form input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '30');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await cdp.click('确认完成');
+  await sleep(800);
+  body = await cdp.text();
+  assert(body.includes('待同步'), '离线操作未进入队列');
+  await cdp.shot('06b-offline');
+  console.log('✓ 离线打卡已暂存');
+
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+  });
+  await cdp.click('重试');
+  await sleep(1500);
+  body = await cdp.text();
+  assert(!body.includes('项待同步'), '恢复网络后队列未清空');
+  console.log('✓ 恢复网络后自动补传');
+
   // 7. 刷新后数据仍在（服务端持久化）
   await cdp.send('Page.navigate', { url: `${base}#report` });
   await sleep(1500);
