@@ -78,7 +78,6 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
       return;
     }
     actions.addItem({
-      goalId: goal.id,
       title: draft.title.trim(),
       subject: draft.subject,
       estimateMin: Math.round(draft.minutes),

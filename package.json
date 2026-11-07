@@ -7,9 +7,14 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && node --test server/api.test.mjs",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "server": "node server/index.mjs",
+    "start": "npm run build && node server/index.mjs",
+    "test:unit": "vitest run",
+    "test:api": "node --test server/api.test.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

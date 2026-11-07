@@ -1,0 +1,344 @@
+import { allowLogin, createSession, destroySession, hashPassword, newId, sessionCookie, clearCookie, verifyPassword } from './auth.mjs';
+import { nowISO } from './db.mjs';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SUBJECTS = new Set(['math', 'major', 'english', 'politics', 'other']);
+const LEVELS = new Set(['zero', 'once', 'twice', 'more']);
+const STATUSES = new Set(['pending', 'running', 'done', 'skipped']);
+const SKIP_REASONS = new Set(['interrupt', 'capacity', 'other', '']);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+class HttpError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+const bad = (code, message) => new HttpError(400, code, message);
+const unauthorized = () => new HttpError(401, 'E2001', '请先登录');
+const notFound = () => new HttpError(404, 'E4004', '资源不存在或不属于当前用户');
+
+function assert(cond, code, message) {
+  if (!cond) throw bad(code, message);
+}
+
+const str = (v, name, max = 120) => {
+  assert(typeof v === 'string' && v.trim().length > 0, 'E1001', `${name}不能为空`);
+  const s = v.trim();
+  assert(s.length <= max, 'E1002', `${name}不能超过 ${max} 字`);
+  return s;
+};
+
+const int = (v, name, min, max) => {
+  const n = Number(v);
+  assert(Number.isFinite(n), 'E1003', `${name}必须是数字`);
+  const r = Math.round(n);
+  assert(r >= min && r <= max, 'E1004', `${name}需在 ${min}~${max} 之间`);
+  return r;
+};
+
+const dateStr = (v, name) => {
+  assert(typeof v === 'string' && DATE_RE.test(v), 'E1005', `${name}格式应为 YYYY-MM-DD`);
+  return v;
+};
+
+function normalizeGoal(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title,
+    deadline: row.deadline,
+    weeklyMinutes: row.weekly_minutes,
+    level: row.level,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeItem(row) {
+  return {
+    id: row.id,
+    goalId: row.goal_id,
+    title: row.title,
+    subject: row.subject,
+    estimateMin: row.estimate_min,
+    weight: row.weight,
+  };
+}
+
+function normalizeBlock(row) {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    date: row.date,
+    startMin: row.start_min,
+    endMin: row.end_min,
+    isBuffer: !!row.is_buffer,
+    status: row.status,
+    actualMin: row.actual_min ?? undefined,
+    skipReason: row.skip_reason ?? undefined,
+  };
+}
+
+export function createApi(db) {
+  const q = {
+    userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+    userById: db.prepare('SELECT * FROM users WHERE id = ?'),
+    insertUser: db.prepare(
+      'INSERT INTO users (id, email, name, pass_hash, week_start, weekdays, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+    ),
+    updateSettings: db.prepare('UPDATE users SET week_start = ?, weekdays = ? WHERE id = ?'),
+    goalByUser: db.prepare('SELECT * FROM goals WHERE user_id = ?'),
+    upsertGoal: db.prepare(`
+      INSERT INTO goals (id, user_id, title, deadline, weekly_minutes, level, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        title = excluded.title, deadline = excluded.deadline,
+        weekly_minutes = excluded.weekly_minutes, level = excluded.level
+    `),
+    itemsByUser: db.prepare('SELECT * FROM items WHERE user_id = ? ORDER BY created_at ASC'),
+    insertItem: db.prepare(
+      'INSERT INTO items (id, user_id, goal_id, title, subject, estimate_min, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ),
+    itemById: db.prepare('SELECT * FROM items WHERE id = ? AND user_id = ?'),
+    deleteItem: db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?'),
+    deleteBlocksOfItem: db.prepare('DELETE FROM blocks WHERE item_id = ? AND user_id = ?'),
+    blocksByUser: db.prepare('SELECT * FROM blocks WHERE user_id = ? ORDER BY date ASC, start_min ASC'),
+    blocksByWeek: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date BETWEEN ? AND ?'),
+    deleteWeek: db.prepare('DELETE FROM blocks WHERE user_id = ? AND date BETWEEN ? AND ?'),
+    insertBlock: db.prepare(`
+      INSERT INTO blocks (id, user_id, item_id, date, start_min, end_min, is_buffer, status, actual_min, skip_reason, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    blockById: db.prepare('SELECT * FROM blocks WHERE id = ? AND user_id = ?'),
+    updateBlock: db.prepare(
+      'UPDATE blocks SET status = ?, actual_min = ?, skip_reason = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+    ),
+    opExists: db.prepare('SELECT 1 AS ok FROM ops WHERE user_id = ? AND op_id = ?'),
+    insertOp: db.prepare('INSERT INTO ops (user_id, op_id, created_at) VALUES (?, ?, ?)'),
+  };
+
+  function stateOf(user) {
+    const goal = normalizeGoal(q.goalByUser.get(user.id));
+    const items = q.itemsByUser.all(user.id).map(normalizeItem);
+    const blocks = q.blocksByUser.all(user.id).map(normalizeBlock);
+    return {
+      user: { id: user.id, name: user.name, email: user.email },
+      goal,
+      items,
+      blocks,
+      settings: user.settings,
+    };
+  }
+
+  const handlers = {
+    'POST /api/auth/register': ({ body, res }) => {
+      const email = str(body.email, '邮箱', 120).toLowerCase();
+      assert(EMAIL_RE.test(email), 'E1006', '邮箱格式不正确');
+      const password = String(body.password ?? '');
+      assert(password.length >= 8, 'E1007', '密码至少 8 位');
+      assert(password.length <= 72, 'E1007', '密码不能超过 72 位');
+      const name = str(body.name ?? '同学', '昵称', 30);
+      if (q.userByEmail.get(email)) throw new HttpError(409, 'E4001', '该邮箱已注册');
+
+      const id = newId('usr');
+      q.insertUser.run(id, email, name, hashPassword(password), '[0,150,150,150,150,150,0]', nowISO());
+      const user = q.userById.get(id);
+      const { token } = createSession(db, id);
+      res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
+      return { user: { id: user.id, name: user.name, email: user.email } };
+    },
+
+    'POST /api/auth/login': ({ body, res, ip }) => {
+      if (!allowLogin(ip)) throw new HttpError(429, 'E2002', '尝试过于频繁，请稍后再试');
+      const email = str(body.email, '邮箱', 120).toLowerCase();
+      const password = String(body.password ?? '');
+      const row = q.userByEmail.get(email);
+      if (!row || !verifyPassword(password, row.pass_hash)) {
+        throw new HttpError(401, 'E2003', '邮箱或密码不正确');
+      }
+      const { token } = createSession(db, row.id);
+      res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
+      return { user: { id: row.id, name: row.name, email: row.email } };
+    },
+
+    'POST /api/auth/logout': ({ res, user }) => {
+      destroySession(db, user.token);
+      res.setHeader('Set-Cookie', clearCookie);
+      return { ok: true };
+    },
+
+    'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+
+    'GET /api/state': ({ user }) => stateOf(user),
+
+    'PUT /api/goal': ({ user, body }) => {
+      assert(body && typeof body === 'object', 'E1001', '缺少目标数据');
+      const title = str(body.title, '目标名称', 60);
+      const deadline = dateStr(body.deadline, '目标日期');
+      const weeklyMinutes = int(body.weeklyMinutes, '每周可用分钟', 30, 10080);
+      const level = String(body.level ?? 'once');
+      assert(LEVELS.has(level), 'E1008', '基础水平取值不合法');
+      const existing = q.goalByUser.get(user.id);
+      q.upsertGoal.run(
+        existing ? existing.id : newId('goal'),
+        user.id,
+        title,
+        deadline,
+        weeklyMinutes,
+        level,
+        existing ? existing.created_at : nowISO(),
+      );
+      return { goal: normalizeGoal(q.goalByUser.get(user.id)) };
+    },
+
+    'POST /api/items': ({ user, body }) => {
+      const goal = q.goalByUser.get(user.id);
+      if (!goal) throw new HttpError(409, 'E4003', '请先创建目标');
+      const item = {
+        id: newId('item'),
+        goalId: goal.id,
+        title: str(body.title, '任务名称', 80),
+        subject: String(body.subject ?? 'other'),
+        estimateMin: int(body.estimateMin, '预估工时', 5, 1440),
+        weight: int(body.weight ?? 3, '权重', 1, 5),
+      };
+      assert(SUBJECTS.has(item.subject), 'E1009', '科目取值不合法');
+      q.insertItem.run(item.id, user.id, item.goalId, item.title, item.subject, item.estimateMin, item.weight, nowISO());
+      return { item };
+    },
+
+    'PUT /api/settings': ({ user, body }) => {
+      const weekStart = Number(body.weekStart);
+      assert(weekStart === 0 || weekStart === 1, 'E1010', '周起始日只能是 0 或 1');
+      const weekdays = body.weekdays;
+      assert(Array.isArray(weekdays) && weekdays.length === 7, 'E1011', '可用时段需要 7 个数值');
+      const safe = weekdays.map((n) => int(n, '每日可用分钟', 0, 1440));
+      q.updateSettings.run(weekStart, JSON.stringify(safe), user.id);
+      return { settings: { weekStart, weekdays: safe } };
+    },
+
+    'PUT /api/blocks': ({ user, body }) => {
+      const weekStart = dateStr(body.weekStart, '周起始日');
+      const blocks = body.blocks;
+      assert(Array.isArray(blocks), 'E1012', 'blocks 必须是数组');
+      assert(blocks.length <= 120, 'E1013', '一次最多写入 120 个任务块');
+      const weekEnd = addDays(weekStart, 6);
+
+      const prepared = blocks.map((b) => {
+        const item = q.itemById.get(String(b.itemId ?? ''), user.id);
+        if (!item) throw bad('E1014', '任务不属于当前用户');
+        const date = dateStr(b.date, '日期');
+        assert(date >= weekStart && date <= weekEnd, 'E1015', '任务块日期必须落在本周');
+        const start = int(b.startMin, '开始时间', 0, 1439);
+        const end = int(b.endMin, '结束时间', 1, 1440);
+        assert(end > start, 'E1016', '结束时间必须晚于开始时间');
+        return {
+          id: String(b.id ?? `${date}_${item.id}`),
+          itemId: item.id,
+          date,
+          start,
+          end,
+          isBuffer: b.isBuffer ? 1 : 0,
+          status: 'pending',
+          actualMin: null,
+          skipReason: null,
+        };
+      });
+
+      db.exec('BEGIN');
+      try {
+        q.deleteWeek.run(user.id, weekStart, weekEnd);
+        for (const b of prepared) {
+          q.insertBlock.run(
+            b.id, user.id, b.itemId, b.date, b.start, b.end, b.isBuffer, b.status, b.actualMin, b.skipReason, nowISO(),
+          );
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      return { blocks: q.blocksByWeek.all(user.id, weekStart, weekEnd).map(normalizeBlock) };
+    },
+  };
+
+  return async function route(method, path, ctx) {
+    // 动态路由：/api/items/:id、/api/blocks/:id
+    const itemMatch = path.match(/^\/api\/items\/([\w-]+)$/);
+    if (itemMatch) {
+      const user = requireUser(ctx);
+      if (method !== 'DELETE') throw new HttpError(405, 'E1000', '方法不支持');
+      const item = q.itemById.get(itemMatch[1], user.id);
+      if (!item) throw notFound();
+      q.deleteBlocksOfItem.run(item.id, user.id);
+      q.deleteItem.run(item.id, user.id);
+      return { ok: true };
+    }
+
+    const blockMatch = path.match(/^\/api\/blocks\/([\w-]+)$/);
+    if (blockMatch) {
+      const user = requireUser(ctx);
+      if (method !== 'PATCH') throw new HttpError(405, 'E1000', '方法不支持');
+      return patchBlock(user, blockMatch[1], ctx.body);
+    }
+
+    const key = `${method} ${path}`;
+    const handler = handlers[key];
+    if (!handler) return undefined;
+    const needsAuth = !key.startsWith('POST /api/auth/');
+    if (needsAuth) requireUser(ctx);
+    return handler({ ...ctx, user: ctx.user });
+  };
+
+  function requireUser(ctx) {
+    if (!ctx.user) throw unauthorized();
+    return ctx.user;
+  }
+
+  function patchBlock(user, id, body) {
+    const block = q.blockById.get(id, user.id);
+    if (!block) throw notFound();
+
+    const opId = typeof body.opId === 'string' ? body.opId.slice(0, 64) : '';
+    if (opId) {
+      if (q.opExists.get(user.id, opId)) return { block: normalizeBlock(block), idempotent: true };
+      q.insertOp.run(user.id, opId, nowISO());
+    }
+
+    const status = String(body.status ?? '');
+    assert(STATUSES.has(status), 'E1017', '状态取值不合法');
+    const allowed = {
+      pending: ['running', 'done', 'skipped'],
+      running: ['done', 'skipped', 'pending'],
+      done: ['pending'],
+      skipped: ['pending'],
+    };
+    assert(allowed[block.status].includes(status), 'E1018', `不允许从 ${block.status} 变为 ${status}`);
+
+    let actualMin = null;
+    let skipReason = null;
+    if (status === 'done') {
+      const fallback = block.end_min - block.start_min;
+      actualMin = int(body.actualMin ?? fallback, '实际用时', 1, 1440);
+    }
+    if (status === 'skipped') {
+      const reason = String(body.skipReason ?? 'other');
+      assert(SKIP_REASONS.has(reason), 'E1019', '跳过原因不合法');
+      skipReason = reason || 'other';
+    }
+
+    q.updateBlock.run(status, actualMin, skipReason, nowISO(), id, user.id);
+    return { block: normalizeBlock(q.blockById.get(id, user.id)) };
+  }
+}
+
+function addDays(iso, days) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+export { HttpError };

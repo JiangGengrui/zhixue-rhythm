@@ -1,0 +1,84 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const DEFAULT_WEEKDAYS = JSON.stringify([0, 150, 150, 150, 150, 150, 0]);
+
+export function openDb(file) {
+  if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
+  migrate(db);
+  return db;
+}
+
+function migrate(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      pass_hash TEXT NOT NULL,
+      week_start INTEGER NOT NULL DEFAULT 1,
+      weekdays TEXT NOT NULL DEFAULT '${DEFAULT_WEEKDAYS}',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      deadline TEXT NOT NULL,
+      weekly_minutes INTEGER NOT NULL,
+      level TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
+
+    CREATE TABLE IF NOT EXISTS items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      goal_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      estimate_min INTEGER NOT NULL,
+      weight INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id);
+
+    CREATE TABLE IF NOT EXISTS blocks (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      start_min INTEGER NOT NULL,
+      end_min INTEGER NOT NULL,
+      is_buffer INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      actual_min INTEGER,
+      skip_reason TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blocks_user_date ON blocks(user_id, date);
+
+    CREATE TABLE IF NOT EXISTS ops (
+      user_id TEXT NOT NULL,
+      op_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, op_id)
+    );
+  `);
+}
+
+export const nowISO = () => new Date().toISOString();
+export const defaultWeekdays = DEFAULT_WEEKDAYS;

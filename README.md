@@ -1,74 +1,82 @@
 # 智学节律 · Web MVP（路线 B）
 
-真实业务逻辑驱动的学习计划应用。**目标 → 计划项 → 周排程 → 今日执行 → 周报复盘** 一条链路全部由代码计算，不再有写死的 68% / +18%。
+真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
 ## 快速开始
 
 ```bash
 npm install
-npm run dev        # 开发：http://localhost:5173
-npm run test       # 引擎单测
-npm run build      # 类型检查 + 生产构建（输出 dist/）
-npm run preview    # 预览构建结果
+npm start          # 构建 + 启动 API 与页面：http://localhost:8787
 ```
 
-打开 `http://localhost:5173/?demo=1` 可自动载入示例数据。
+开发模式（前端热更新 + 后端分离）：
 
-## 技术栈
+```bash
+npm run server     # 终端 1：API + SQLite，:8787
+npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
+```
+
+首次打开是登录页，注册一个账号即可使用（密码 ≥ 8 位，数据按账号隔离）。
+
+## 技术栈与结构
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 构建 | Vite 6 | 静态产物，可部署到任意静态托管 |
-| 框架 | React 19 + TypeScript（strict） | 组件化，类型安全 |
-| 样式 | 原生 CSS + 设计 token | 沿用 demo 的纸感配色，无 UI 框架 |
-| 测试 | Vitest | 引擎纯函数单测 |
+| 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS token，无 UI 框架 |
+| 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
+| 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出即失效 |
+| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 24 条自动化用例 + 10 步浏览器验收 |
 
-## 目录结构
+> 说明：架构文档原定 Go + Postgres。当前环境无 Go/Postgres，为满足"一条命令可运行"，后端先用 Node + SQLite 实现，**接口契约与领域规则保持不变**，后续平移 Go 时前端无需改动。
 
 ```
+server/
+├── index.mjs      HTTP 入口：路由分发、静态资源、统一错误
+├── api.mjs        业务接口 + 校验 + 状态机
+├── auth.mjs       scrypt 哈希、会话、Cookie、登录限流
+├── db.mjs         SQLite 打开与建表（幂等迁移）
+└── api.test.mjs   7 条接口测试（越权/幂等/非法迁移）
 src/
-├── domain/            纯函数领域层（不依赖 React / 浏览器）
-│   ├── types.ts       实体与枚举
-│   ├── date.ts        日期工具（本地时区，禁止 toISOString）
-│   ├── engine.ts      可行性 / 装箱 / 偏差 / 归因
-│   └── engine.test.ts 17 条单测（含边界）
-├── store.ts           状态 + 本地持久化（localStorage，接口可替换为后端）
-├── components.tsx     Card / Stat / Button / Field / Empty / Meter
-├── pages/             Today / Goal / Week / Report
-├── styles/app.css     token + 布局
-├── App.tsx            路由（hash）、错误边界、演示入口
-└── main.tsx           挂载
+├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因）+ 17 条单测
+├── data/api.ts    唯一 HTTP 客户端
+├── store.ts       会话 + 服务端状态（前端唯一数据出口）
+├── pages/         Auth / Today / Goal / Week / Report
+└── components.tsx Card / Stat / Button / Field / Empty / Meter
+scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 ```
 
-## 引擎约定（可被离线重放）
+## 接口约定
 
-- **纯函数**：输入结构体快照，输出结果，不读时钟、不读 localStorage、无随机数
-- **确定性**：同输入必同输出（排序含 id 兜底，避免并列时顺序漂移）
-- **可单测**：`npm test` 覆盖空数据、容量为 0、跨日、超额、弹性位、除零
-
-| 函数 | 输入 | 输出 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `feasibility` | 目标、计划项、今天 | 需求工时、可用工时（×0.85）、`R = 需求/可用`、可行档位 |
-| `packWeek` | 计划项、可用时段、周起始日 | Block 列表、溢出项、容量/弹性位占用、建议 |
-| `deviationStats` | Block 列表 | 偏差中位数、P90、样本数 |
-| `buildReport` | 本周 Block、可用时段、周起始日 | 达成率、有效时长、归因占比（合计 100%）、一条建议 |
+| POST | `/api/auth/register` | 注册并建立会话 |
+| POST | `/api/auth/login` | 登录（同 IP 每分钟限 10 次） |
+| POST | `/api/auth/logout` | 登出，销毁会话 |
+| GET | `/api/state` | 当前用户的目标、计划项、任务块、设置 |
+| PUT | `/api/goal` | 新建或更新目标（单用户唯一） |
+| POST | `/api/items` | 添加计划项 |
+| DELETE | `/api/items/:id` | 删除计划项并级联清理其任务块 |
+| PUT | `/api/settings` | 每周可用时段、周起始日 |
+| PUT | `/api/blocks` | 覆盖某周任务块（客户端排程结果） |
+| PATCH | `/api/blocks/:id` | 打卡状态迁移，带 `opId` 幂等 |
 
-## 数据存储
-
-MVP 阶段数据存本机 `localStorage`（key: `zhixue.app.v2`），写入失败与数据损坏都会降级为可控状态（不白屏）。
-`store.ts` 是唯一持久化出口，接入后端时只需替换该文件实现，页面与引擎不用改。
+错误统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。
 
 ## 已验证
 
-- `npm run test`：17 条用例通过
-- `npx tsc --noEmit`：0 错误
-- `npm run build`：构建成功（JS 254 KB / gzip 80 KB，CSS 8.9 KB / gzip 2.7 KB）
-- 桌面 1280px 与手机 390px 实测：无横向溢出、统计卡自动换行
+| 检查 | 结果 |
+|---|---|
+| `npm test` | 24 条通过（引擎 17 + 接口 7） |
+| `npx tsc --noEmit` | 0 错误 |
+| `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
+| `node scripts/e2e.mjs` | 10 步全通过：登录页 → 注册 → 载入示例 → 生成周计划 → 打卡 → 周报 → 刷新保持 → 登出 → 控制台零报错 |
 
-## 下一步（按规划文档 M1 起）
+安全边界：所有查询按 `user_id` 过滤；越权改他人任务块返回 404；计划项不能跨用户塞入；口令与 Cookie 不落日志；请求体上限 1MB；密码错 10 次/分钟限流。
 
-1. 账号与数据隔离（登录、`user_id`、RLS）
-2. Go API + Postgres 替换 localStorage（`store.ts` 实现替换即可）
-3. 打卡操作幂等（`op_id`）与离线队列
-4. 周报归因加入"中断时段"证据句
-5. E2E 覆盖主链路 + CI 卡口
+## 已知限制（下一轮处理）
+
+1. 周中生成计划从周一排起，可能把任务排到已过去的日期——需支持"从今天起排"。
+2. 周报在前端计算（数据源是服务端任务块），后续下沉到服务端以便跨端一致。
+3. 无设置界面（每周可用时段、周起始日接口已就绪，UI 未接）。
+4. 无找回密码 / 邮箱验证；注册未做邮箱唯一性以外的校验。
+5. 无离线队列与多端冲突合并（当前以服务端为准）。

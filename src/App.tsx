@@ -6,6 +6,7 @@ import { GoalPage } from './pages/GoalPage';
 import { TodayPage } from './pages/TodayPage';
 import { WeekPage } from './pages/WeekPage';
 import { ReportPage } from './pages/ReportPage';
+import { AuthPage } from './pages/AuthPage';
 import { startOfWeek, todayISO, weekDates } from './domain/date';
 
 type Tab = 'today' | 'goal' | 'week' | 'report';
@@ -47,7 +48,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App() {
-  const { state, actions } = useAppState();
+  const { phase, error, state, actions } = useAppState();
   const [tab, setTab] = useState<Tab>(() => {
     const h = location.hash.slice(1);
     return TABS.some((t) => t.key === h) ? (h as Tab) : 'today';
@@ -62,18 +63,37 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // 分享演示链接：?demo=1 时自动载入示例（已有数据则不动）
-  useEffect(() => {
-    if (new URLSearchParams(location.search).get('demo') === '1' && !state.goal) {
-      actions.seedDemo();
-    }
-    // 只在首次挂载时判断
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   function go(next: Tab) {
     setTab(next);
     history.replaceState(null, '', `#${next}`);
+  }
+
+  if (phase === 'loading') {
+    return (
+      <div className="boot">
+        <span className="mark" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <p>正在恢复会话…</p>
+      </div>
+    );
+  }
+
+  if (phase === 'guest') {
+    return <AuthPage actions={actions} error={error} />;
+  }
+
+  if (phase === 'error') {
+    return (
+      <div className="boot">
+        <p>{error ?? '加载失败'}</p>
+        <Button variant="primary" onClick={() => void actions.refresh()}>
+          重试
+        </Button>
+      </div>
+    );
   }
 
   const weekStart = startOfWeek(todayISO(), state.settings.weekStart);
@@ -91,7 +111,7 @@ export default function App() {
           </span>
           <span>
             <strong>智学节律</strong>
-            <small>让计划跟得上现实 · MVP v0.1</small>
+            <small>让计划跟得上现实 · v0.2</small>
           </span>
         </div>
 
@@ -110,19 +130,21 @@ export default function App() {
         </nav>
 
         <div className="top-actions">
-          <span className="hint">本周 {weekBlocks.length} 项</span>
-          <Button
-            variant="quiet"
-            onClick={() => {
-              if (confirm('清空所有本地数据？此操作不可撤销。')) actions.reset();
-            }}
-          >
-            重置
+          <span className="hint">
+            {state.user?.name} · 本周 {weekBlocks.length} 项
+          </span>
+          <Button variant="quiet" onClick={() => void actions.logout()}>
+            退出
           </Button>
         </div>
       </header>
 
       <main className="main">
+        {error && (
+          <div className="banner" role="alert">
+            {error}
+          </div>
+        )}
         <ErrorBoundary>
           {tab === 'today' && <TodayPage state={state} actions={actions} />}
           {tab === 'goal' && <GoalPage state={state} actions={actions} />}
@@ -132,7 +154,7 @@ export default function App() {
       </main>
 
       <footer className="foot">
-        <span>数据保存在本机浏览器 · 后续接入账号与云端同步</span>
+        <span>账号与数据保存在服务端 · 会话 30 天</span>
         <span>引擎：可行性 R 值 / 周装箱 / 偏差与归因（纯函数，可单测）</span>
       </footer>
     </div>

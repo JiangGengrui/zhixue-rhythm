@@ -1,202 +1,233 @@
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from './data/api';
+import type { SessionUser } from './data/api';
 import { packWeek } from './domain/engine';
-import { startOfWeek, todayISO, weekDates } from './domain/date';
+import { weekDates } from './domain/date';
 import type { Block, BlockStatus, Goal, PlanItem, Settings } from './domain/types';
 
-export const STORAGE_KEY = 'zhixue.app.v2';
+export const defaultSettings: Settings = {
+  weekStart: 1,
+  weekdays: [0, 150, 150, 150, 150, 150, 0],
+};
+
+export type Phase = 'loading' | 'guest' | 'ready' | 'error';
 
 export interface AppState {
-  version: 2;
-  profile: { name: string };
+  user: SessionUser | null;
   goal: Goal | null;
   items: PlanItem[];
   blocks: Block[];
   settings: Settings;
 }
 
-const defaultSettings: Settings = {
-  weekStart: 1,
-  // 周日..周六，默认工作日 150 分钟，周末留白
-  weekdays: [0, 150, 150, 150, 150, 150, 0],
-};
-
 const emptyState: AppState = {
-  version: 2,
-  profile: { name: '同学' },
+  user: null,
   goal: null,
   items: [],
   blocks: [],
   settings: defaultSettings,
 };
 
-function loadState(): AppState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyState;
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    if (parsed.version !== 2) return emptyState;
-    return {
-      version: 2,
-      profile: parsed.profile ?? emptyState.profile,
-      goal: parsed.goal ?? null,
-      items: Array.isArray(parsed.items) ? parsed.items : [],
-      blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
-      settings: parsed.settings ?? defaultSettings,
-    };
-  } catch {
-    // 本地数据损坏时回到空状态，而不是白屏
-    console.warn('[store] 本地数据解析失败，已重置');
-    return emptyState;
-  }
-}
-
-const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
-
 export interface Actions {
-  setGoal: (goal: Goal) => void;
-  addItem: (item: Omit<PlanItem, 'id'>) => void;
-  removeItem: (id: string) => void;
-  updateSettings: (settings: Settings) => void;
-  generateWeek: (weekStartISO: string) => void;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, name: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+  setGoal: (goal: Goal) => Promise<void>;
+  addItem: (item: Omit<PlanItem, 'id' | 'goalId'>) => Promise<void>;
+  removeItem: (id: string) => Promise<void>;
+  updateSettings: (settings: Settings) => Promise<void>;
+  generateWeek: (weekStartISO: string) => Promise<void>;
   setBlockStatus: (
     id: string,
     status: BlockStatus,
     actualMin?: number,
     skipReason?: Block['skipReason'],
-  ) => void;
-  seedDemo: () => void;
-  reset: () => void;
+  ) => Promise<void>;
+  seedDemo: () => Promise<void>;
 }
 
-export function useAppState(): { state: AppState; actions: Actions } {
-  const [state, setState] = useState<AppState>(() => loadState());
+const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : '操作失败，请稍后重试');
+
+export function useAppState() {
+  const [phase, setPhase] = useState<Phase>('loading');
+  const [state, setState] = useState<AppState>(emptyState);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const s = await api.state();
+      setState({
+        user: s.user,
+        goal: s.goal,
+        items: s.items,
+        blocks: s.blocks,
+        settings: s.settings ?? defaultSettings,
+      });
+      setPhase('ready');
+      setError(null);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setPhase('guest');
+        setState(emptyState);
+        return;
+      }
+      setError(messageOf(err));
+      setPhase('error');
+    }
+  }, []);
 
   useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = useCallback(async (fn: () => Promise<void>) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      console.warn('[store] 本地存储写入失败（可能是空间不足）');
+      await fn();
+      setError(null);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setPhase('guest');
+        return;
+      }
+      setError(messageOf(err));
+      throw err;
     }
-  }, [state]);
-
-  const setGoal = useCallback((goal: Goal) => {
-    setState((prev) => ({ ...prev, goal }));
   }, []);
 
-  const addItem = useCallback((item: Omit<PlanItem, 'id'>) => {
-    setState((prev) => ({ ...prev, items: [...prev.items, { ...item, id: uid('item') }] }));
-  }, []);
-
-  const removeItem = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      items: prev.items.filter((i) => i.id !== id),
-      blocks: prev.blocks.filter((b) => b.itemId !== id),
-    }));
-  }, []);
-
-  const updateSettings = useCallback((settings: Settings) => {
-    setState((prev) => ({ ...prev, settings }));
-  }, []);
-
-  /** 生成本周 Block：保留已有完成状态，避免重复生成丢失记录 */
-  const generateWeek = useCallback((weekStartISO: string) => {
-    setState((prev) => {
-      if (!prev.goal) return prev;
-      const items = prev.items.filter((i) => i.goalId === prev.goal!.id);
-      const packed = packWeek(items, prev.settings, weekStartISO);
-      const existing = new Map(prev.blocks.map((b) => [b.id, b]));
-      const merged = packed.blocks.map((b) => {
-        const old = existing.get(b.id);
-        return old
-          ? { ...b, status: old.status, actualMin: old.actualMin, skipReason: old.skipReason }
-          : b;
-      });
-      const inWeek = new Set(weekDates(weekStartISO));
-      const outside = prev.blocks.filter((b) => !inWeek.has(b.date));
-      return { ...prev, blocks: [...outside, ...merged] };
-    });
-  }, []);
-
-  const setBlockStatus = useCallback(
-    (id: string, status: BlockStatus, actualMin?: number, skipReason?: Block['skipReason']) => {
-      setState((prev) => ({
-        ...prev,
-        blocks: prev.blocks.map((b) =>
-          b.id === id ? { ...b, status, actualMin: actualMin ?? b.actualMin, skipReason } : b,
-        ),
-      }));
+  const login = useCallback(
+    async (email: string, password: string) => {
+      await api.login({ email, password });
+      await load();
     },
-    [],
+    [load],
   );
 
-  const seedDemo = useCallback(() => {
-    const goalId = uid('goal');
-    const goal: Goal = {
-      id: goalId,
-      title: '2027 考研 · 计算机科学',
-      deadline: '2026-12-19',
-      weeklyMinutes: 900,
-      level: 'once',
-      createdAt: new Date().toISOString(),
-    };
-    const items: PlanItem[] = [
-      ['高数 · 极限与连续 40 题', 'math', 120, 5],
-      ['408 · 二叉树遍历专题', 'major', 90, 5],
-      ['英语 · 真题 2018 Text 2', 'english', 60, 4],
-      ['线性代数 · 矩阵运算', 'math', 90, 4],
-      ['408 · 图的最短路径', 'major', 120, 4],
-      ['政治 · 马原第一章', 'politics', 60, 2],
-      ['英语 · 长难句 5 句', 'english', 45, 3],
-      ['408 · 排序算法复习', 'major', 75, 3],
-    ].map(([title, subject, estimateMin, weight]) => ({
-      id: uid('item'),
-      goalId,
-      title: title as string,
-      subject: subject as PlanItem['subject'],
-      estimateMin: estimateMin as number,
-      weight: weight as number,
-    }));
+  const register = useCallback(
+    async (email: string, password: string, name: string) => {
+      await api.register({ email, password, name });
+      await load();
+    },
+    [load],
+  );
 
-    // 示例数据同时生成本周计划，并把最重要的三项落到今天，便于立刻体验执行与复盘
-    const weekStart = startOfWeek(todayISO(), defaultSettings.weekStart);
-    const packed = packWeek(items, defaultSettings, weekStart);
-    const today = todayISO();
-    const todayItems = items.slice(0, 3);
-
-    const blocks: Block[] = packed.blocks
-      .filter((b) => !todayItems.some((i) => i.id === b.itemId))
-      .map((b) => b);
-
-    const todaySlots = [
-      { startMin: 9 * 60, endMin: 11 * 60, done: true, actualMin: 128 },
-      { startMin: 14 * 60, endMin: 15 * 60 + 30, done: true, actualMin: 85 },
-      { startMin: 19 * 60 + 30, endMin: 20 * 60 + 30, done: false, actualMin: 0 },
-    ];
-    todayItems.forEach((item, i) => {
-      const slot = todaySlots[i];
-      if (!slot) return;
-      blocks.push({
-        id: `blk_${today}_${item.id}`,
-        itemId: item.id,
-        date: today,
-        startMin: slot.startMin,
-        endMin: slot.endMin,
-        isBuffer: false,
-        status: slot.done ? 'done' : 'pending',
-        actualMin: slot.done ? slot.actualMin : undefined,
-      });
-    });
-
-    setState((prev) => ({ ...prev, goal, items, blocks }));
+  const logout = useCallback(async () => {
+    await api.logout().catch(() => undefined);
+    setState(emptyState);
+    setPhase('guest');
   }, []);
 
-  const reset = useCallback(() => {
-    setState({ ...emptyState, settings: state.settings });
-  }, [state.settings]);
+  const setGoal = useCallback(async (goal: Goal) => {
+    await run(async () => {
+      const res = await api.putGoal({
+        title: goal.title,
+        deadline: goal.deadline,
+        weeklyMinutes: goal.weeklyMinutes,
+        level: goal.level,
+      });
+      setState((prev) => ({ ...prev, goal: res.goal }));
+    });
+  }, [run]);
+
+  const addItem = useCallback(async (item: Omit<PlanItem, 'id' | 'goalId'>) => {
+    await run(async () => {
+      const res = await api.addItem(item);
+      setState((prev) => ({ ...prev, items: [...prev.items, res.item] }));
+    });
+  }, [run]);
+
+  const removeItem = useCallback(async (id: string) => {
+    await run(async () => {
+      await api.deleteItem(id);
+      setState((prev) => ({
+        ...prev,
+        items: prev.items.filter((i) => i.id !== id),
+        blocks: prev.blocks.filter((b) => b.itemId !== id),
+      }));
+    });
+  }, [run]);
+
+  const updateSettings = useCallback(async (settings: Settings) => {
+    await run(async () => {
+      const res = await api.putSettings(settings);
+      setState((prev) => ({ ...prev, settings: res.settings }));
+    });
+  }, [run]);
+
+  const generateWeek = useCallback(async (weekStartISO: string) => {
+    await run(async () => {
+      const items = state.items.filter((i) => i.goalId === state.goal?.id);
+      const packed = packWeek(items, state.settings, weekStartISO);
+      const inWeek = new Set(weekDates(weekStartISO));
+      const existing = new Map(state.blocks.filter((b) => inWeek.has(b.date)).map((b) => [b.id, b]));
+
+      // 保留已完成状态，避免重新生成丢失记录
+      const payload = packed.blocks.map((b) => {
+        const old = existing.get(b.id);
+        return {
+          id: b.id,
+          itemId: b.itemId,
+          date: b.date,
+          startMin: b.startMin,
+          endMin: b.endMin,
+          isBuffer: b.isBuffer,
+          status: old?.status ?? b.status,
+          actualMin: old?.actualMin,
+          skipReason: old?.skipReason,
+        };
+      });
+
+      const res = await api.putBlocks(weekStartISO, payload);
+      setState((prev) => ({
+        ...prev,
+        blocks: [...prev.blocks.filter((b) => !inWeek.has(b.date)), ...res.blocks],
+      }));
+    });
+  }, [run, state.items, state.blocks, state.goal?.id, state.settings]);
+
+  const setBlockStatus = useCallback(
+    async (id: string, status: BlockStatus, actualMin?: number, skipReason?: Block['skipReason']) => {
+      await run(async () => {
+        const res = await api.patchBlock(id, { status, actualMin, skipReason });
+        setState((prev) => ({
+          ...prev,
+          blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)),
+        }));
+      });
+    },
+    [run],
+  );
+
+  const seedDemo = useCallback(async () => {
+    await run(async () => {
+      await api.putGoal({
+        title: '2027 考研 · 计算机科学',
+        deadline: '2026-12-19',
+        weeklyMinutes: 900,
+        level: 'once',
+      });
+      const drafts: Array<Omit<PlanItem, 'id' | 'goalId'>> = [
+        { title: '高数 · 极限与连续 40 题', subject: 'math', estimateMin: 120, weight: 5 },
+        { title: '408 · 二叉树遍历专题', subject: 'major', estimateMin: 90, weight: 5 },
+        { title: '英语 · 真题 2018 Text 2', subject: 'english', estimateMin: 60, weight: 4 },
+        { title: '线性代数 · 矩阵运算', subject: 'math', estimateMin: 90, weight: 4 },
+        { title: '408 · 图的最短路径', subject: 'major', estimateMin: 120, weight: 4 },
+        { title: '政治 · 马原第一章', subject: 'politics', estimateMin: 60, weight: 2 },
+        { title: '英语 · 长难句 5 句', subject: 'english', estimateMin: 45, weight: 3 },
+        { title: '408 · 排序算法复习', subject: 'major', estimateMin: 75, weight: 3 },
+      ];
+      for (const d of drafts) await api.addItem(d);
+      await load();
+    });
+  }, [run, load]);
 
   return {
+    phase,
+    error,
     state,
-    actions: { setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, reset },
+    actions: {
+      login, register, logout, refresh: load,
+      setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo,
+    } satisfies Actions,
   };
 }
