@@ -2,6 +2,12 @@
 
 真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
+## 线上地址
+
+https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ
+
+> 该应用与早期静态 demo 共用同一个平台应用记录，发布新版本会覆盖原 demo 页面（demo 源码仍保留在 `../web-demo`）。
+
 ## 快速开始
 
 ```bash
