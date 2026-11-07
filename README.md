@@ -2,6 +2,21 @@
 
 真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
+**当前版本：v1.0.0（MVP 交付版）** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
+
+## 版本历史
+
+| 版本 | 主题 | 关键能力 |
+|---|---|---|
+| v0.1.0 | 前端 MVP 与领域引擎 | 四视图 + 可行性/装箱/偏差/归因引擎，本地持久化 |
+| v0.2.0 | 账号与服务端存储 | 注册登录、SQLite、按用户隔离、打卡状态机 |
+| v0.3.0 | 排程与周报下沉服务端 | 引擎前后端同源、设置页、重叠校验 |
+| v0.4.0 | 工时账本与数据权利 | 剩余工时扣减、跨周去重、导出、注销 |
+| v0.5.0 | 排程细化与任务调整 | 跨天拆分、任务块移动/删除、改密 |
+| v0.6.0 | 账号自救与首次上线 | 恢复码找回、API 契约、操作手册 |
+| v0.7.0 | 离线可用与运维备份 | 本地操作队列（幂等补传）、备份脚本 |
+| v1.0.0 | 线上发布与验收 | 全链路线上验收、发布流程固化 |
+
 ## 线上地址
 
 https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ
@@ -55,16 +70,19 @@ server/
 ├── auth.mjs       scrypt 哈希、会话、Cookie、登录限流
 ├── db.mjs         SQLite 打开与建表（幂等迁移）
 ├── engine.generated.mjs  由 src/domain/engine.ts 打包而来（构建产物，勿手改）
-└── api.test.mjs   7 条接口测试（越权/幂等/非法迁移）
+└── api.test.mjs   19 条接口测试（越权/幂等/非法迁移/导出/注销/恢复码）
 src/
-├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因）+ 17 条单测
+├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因）+ 20 条单测
 ├── data/api.ts    唯一 HTTP 客户端
-├── store.ts       会话 + 服务端状态（前端唯一数据出口）
-├── pages/         Auth / Today / Goal / Week / Report
+├── data/offlineQueue.ts  离线操作队列（断网暂存 + opId 幂等补传）
+├── store.ts       会话 + 服务端状态（前端唯一数据出口，含乐观更新）
+├── pages/         Auth / Today / Goal / Week / Report / Settings
 └── components.tsx Card / Stat / Button / Field / Empty / Meter
 scripts/e2e.mjs    真实 Chrome 走完整链路并截图
+scripts/backup.mjs 数据库冷备（checkpoint + 保留最近 14 份）
 docs/openapi.yaml  API 契约
 docs/操作手册.md    启动、备份、回滚、排障
+CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
 ```
 
 ## 接口约定
@@ -97,7 +115,7 @@ docs/操作手册.md    启动、备份、回滚、排障
 | `npm test` | 39 条通过（引擎 20 + 接口 19） |
 | `npx tsc --noEmit` | 0 错误 |
 | `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
-| `node scripts/e2e.mjs` | 17 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 控制台零报错 |
+| `node scripts/e2e.mjs` | 17 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → **断网打卡 → 恢复补传** → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 忘记密码入口 → 控制台零报错 |
 
 安全边界：所有查询按 `user_id` 过滤；越权改他人任务块返回 404；计划项不能跨用户塞入；口令与 Cookie 不落日志；请求体上限 1MB；密码错 10 次/分钟限流。
 
