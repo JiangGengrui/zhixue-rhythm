@@ -29,7 +29,9 @@ const emptyState: AppState = {
 
 export interface Actions {
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
+  register: (email: string, password: string, name: string) => Promise<string>;
+  recover: (email: string, recoveryCode: string, newPassword: string) => Promise<string>;
+  dismissRecovery: () => void;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   setGoal: (goal: Goal) => Promise<void>;
@@ -56,6 +58,7 @@ export function useAppState() {
   const [phase, setPhase] = useState<Phase>('loading');
   const [state, setState] = useState<AppState>(emptyState);
   const [error, setError] = useState<string | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -108,11 +111,22 @@ export function useAppState() {
 
   const register = useCallback(
     async (email: string, password: string, name: string) => {
-      await api.register({ email, password, name });
+      const res = await api.register({ email, password, name });
+      setRecoveryCode(res.recoveryCode);
       await load();
+      return res.recoveryCode;
     },
     [load],
   );
+
+  const recover = useCallback(async (email: string, code: string, newPassword: string) => {
+    const res = await api.recover({ email, recoveryCode: code, newPassword });
+    setRecoveryCode(res.recoveryCode);
+    setPhase('guest');
+    return res.recoveryCode;
+  }, []);
+
+  const dismissRecovery = useCallback(() => setRecoveryCode(null), []);
 
   const logout = useCallback(async () => {
     await api.logout().catch(() => undefined);
@@ -235,8 +249,9 @@ export function useAppState() {
     phase,
     error,
     state,
+    recoveryCode,
     actions: {
-      login, register, logout, refresh: load,
+      login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
       moveBlock, deleteBlock, changePassword,
     } satisfies Actions,

@@ -402,6 +402,49 @@ test('修改密码：校验旧密码、旧会话失效、新密码可登录', as
   assert.equal(oldLogin.status, 401);
 });
 
+test('恢复码：注册下发、错误码拒绝、正确重置并轮换', async () => {
+  const reg = await call('POST', '/api/auth/register', { email: 'recover@test.dev', password: 'password123', name: '恢复' });
+  assert.equal(reg.status, 200);
+  const code = reg.json.recoveryCode;
+  assert.match(code, /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{2}$/);
+  const cookie = reg.cookie;
+
+  const wrong = await call('POST', '/api/auth/recover', {
+    email: 'recover@test.dev', recoveryCode: 'AAAA-BBBB-CC', newPassword: 'resetpass123',
+  });
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.json.error.code, 'E1029');
+
+  const unknown = await call('POST', '/api/auth/recover', {
+    email: 'nobody@test.dev', recoveryCode: code, newPassword: 'resetpass123',
+  });
+  assert.equal(unknown.status, 400, '不存在的邮箱应返回同样错误');
+
+  const ok = await call('POST', '/api/auth/recover', {
+    email: 'recover@test.dev', recoveryCode: code.toLowerCase(), newPassword: 'resetpass123',
+  });
+  assert.equal(ok.status, 200);
+  assert.notEqual(ok.json.recoveryCode, code, '恢复码应轮换');
+
+  const oldSession = await call('GET', '/api/state', null, cookie);
+  assert.equal(oldSession.status, 401, '重置后旧会话应失效');
+
+  const newLogin = await call('POST', '/api/auth/login', { email: 'recover@test.dev', password: 'resetpass123' });
+  assert.equal(newLogin.status, 200);
+  const oldLogin = await call('POST', '/api/auth/login', { email: 'recover@test.dev', password: 'password123' });
+  assert.equal(oldLogin.status, 401);
+
+  const reuse = await call('POST', '/api/auth/recover', {
+    email: 'recover@test.dev', recoveryCode: code, newPassword: 'anotherpass123',
+  });
+  assert.equal(reuse.status, 400, '旧恢复码不能再次使用');
+
+  const rotated = await call('POST', '/api/auth/recover', {
+    email: 'recover@test.dev', recoveryCode: ok.json.recoveryCode, newPassword: 'thirdpass1234',
+  });
+  assert.equal(rotated.status, 200);
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

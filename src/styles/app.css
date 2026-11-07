@@ -289,3 +289,23 @@ p { margin: 0; }
   font-size: 9.5px; color: #3f7a61; text-align: left; text-decoration: underline;
 }
 .slot-edit:hover { color: var(--green); }
+
+/* ── 恢复码 ── */
+.recovery-overlay {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px;
+  background: rgba(32, 43, 40, 0.32); backdrop-filter: blur(2px);
+}
+.recovery-card {
+  width: 100%; max-width: 380px; background: #fff; border-radius: 20px; padding: 24px;
+  box-shadow: 0 24px 60px rgba(38, 60, 49, 0.22); display: grid; gap: 10px;
+}
+.recovery-card strong { font-size: 16px; }
+.recovery-card p { font-size: 12.5px; color: var(--muted); }
+.recovery-code {
+  display: block; font-family: var(--font-mono, 'SF Mono', Consolas, monospace);
+  font-size: 20px; letter-spacing: 0.12em; background: var(--green-bg); color: var(--green);
+  padding: 14px 16px; border-radius: 12px; text-align: center; user-select: all;
+}
+.auth-done { display: grid; gap: 10px; font-size: 13px; }
+.auth-done strong { font-size: 15px; }
+.auth-done p { color: var(--muted); font-size: 12.5px; }

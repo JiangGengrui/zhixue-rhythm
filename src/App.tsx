@@ -49,8 +49,38 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="recovery-overlay" role="dialog" aria-modal="true" aria-label="请保存恢复码">
+      <div className="recovery-card">
+        <strong>请保存你的恢复码</strong>
+        <p>忘记密码时只能用它重置，关闭后不再显示。</p>
+        <code className="recovery-code">{code}</code>
+        <div className="row">
+          <Button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(code);
+                setCopied(true);
+              } catch {
+                setCopied(false);
+              }
+            }}
+          >
+            {copied ? '已复制' : '复制恢复码'}
+          </Button>
+          <Button variant="primary" onClick={onClose}>
+            我已保存
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const { phase, error, state, actions } = useAppState();
+  const { phase, error, state, actions, recoveryCode } = useAppState();
   const [tab, setTab] = useState<Tab>(() => {
     const h = location.hash.slice(1);
     return TABS.some((t) => t.key === h) ? (h as Tab) : 'today';
@@ -155,6 +185,8 @@ export default function App() {
           {tab === 'settings' && <SettingsPage state={state} actions={actions} />}
         </ErrorBoundary>
       </main>
+
+      {recoveryCode && <RecoveryNotice code={recoveryCode} onClose={actions.dismissRecovery} />}
 
       <footer className="foot">
         <span>账号与数据保存在服务端 · 会话 30 天</span>

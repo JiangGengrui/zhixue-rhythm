@@ -80,6 +80,11 @@ function migrate(db) {
   `);
 
   // 增量迁移：任务剩余工时（老库补列，默认取预估工时）
+  const userCols = db.prepare('PRAGMA table_info(users)').all();
+  if (!userCols.some((c) => c.name === 'recovery_hash')) {
+    db.exec('ALTER TABLE users ADD COLUMN recovery_hash TEXT');
+  }
+
   const cols = db.prepare('PRAGMA table_info(items)').all();
   if (!cols.some((c) => c.name === 'remaining_min')) {
     db.exec('ALTER TABLE items ADD COLUMN remaining_min INTEGER');

@@ -1,4 +1,7 @@
-import { allowLogin, createSession, destroySession, hashPassword, newId, sessionCookie, clearCookie, verifyPassword } from './auth.mjs';
+import {
+  allowLogin, createSession, destroySession, generateRecoveryCode, hashPassword, hashRecoveryCode,
+  newId, sessionCookie, clearCookie, verifyPassword, verifyRecoveryCode,
+} from './auth.mjs';
 import { nowISO } from './db.mjs';
 import { buildReport, packWeek } from './engine.generated.mjs';
 
@@ -88,8 +91,9 @@ export function createApi(db) {
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
     insertUser: db.prepare(
-      'INSERT INTO users (id, email, name, pass_hash, week_start, weekdays, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      'INSERT INTO users (id, email, name, pass_hash, recovery_hash, week_start, weekdays, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
     ),
+    updateRecovery: db.prepare('UPDATE users SET recovery_hash = ? WHERE id = ?'),
     updateSettings: db.prepare('UPDATE users SET week_start = ?, weekdays = ? WHERE id = ?'),
     goalByUser: db.prepare('SELECT * FROM goals WHERE user_id = ?'),
     upsertGoal: db.prepare(`
@@ -157,11 +161,16 @@ export function createApi(db) {
       if (q.userByEmail.get(email)) throw new HttpError(409, 'E4001', '该邮箱已注册');
 
       const id = newId('usr');
-      q.insertUser.run(id, email, name, hashPassword(password), '[0,150,150,150,150,150,120]', nowISO());
+      const recoveryCode = generateRecoveryCode();
+      q.insertUser.run(
+        id, email, name, hashPassword(password), hashRecoveryCode(recoveryCode),
+        '[0,150,150,150,150,150,120]', nowISO(),
+      );
       const user = q.userById.get(id);
       const { token } = createSession(db, id);
       res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
-      return { user: { id: user.id, name: user.name, email: user.email } };
+      // 恢复码只在此刻明文返回一次，服务端只存哈希
+      return { user: { id: user.id, name: user.name, email: user.email }, recoveryCode };
     },
 
     'POST /api/auth/login': ({ body, res, ip }) => {
@@ -175,6 +184,28 @@ export function createApi(db) {
       const { token } = createSession(db, row.id);
       res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
       return { user: { id: row.id, name: row.name, email: row.email } };
+    },
+
+    'POST /api/auth/recover': ({ body, res, ip }) => {
+      if (!allowLogin(ip, 'recover')) throw new HttpError(429, 'E2002', '尝试过于频繁，请稍后再试');
+      const email = str(body.email, '邮箱', 120).toLowerCase();
+      const code = String(body.recoveryCode ?? '');
+      const next = String(body.newPassword ?? '');
+      assert(next.length >= 8, 'E1007', '新密码至少 8 位');
+
+      const row = q.userByEmail.get(email);
+      // 统一提示，避免暴露邮箱是否存在
+      if (!row || !verifyRecoveryCode(code, row.recovery_hash)) {
+        throw new HttpError(400, 'E1029', '邮箱或恢复码不正确');
+      }
+
+      const rotated = generateRecoveryCode();
+      q.updatePassword.run(hashPassword(next), row.id);
+      q.updateRecovery.run(hashRecoveryCode(rotated), row.id);
+      // 重置后所有旧会话失效，需重新登录
+      q.sessionsOfUser.run(row.id);
+      res.setHeader('Set-Cookie', clearCookie);
+      return { ok: true, recoveryCode: rotated };
     },
 
     'POST /api/auth/logout': ({ res, user }) => {

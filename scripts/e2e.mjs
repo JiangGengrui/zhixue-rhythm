@@ -302,6 +302,14 @@ async function main() {
   await cdp.shot('08-logout');
   console.log('✓ 登出正常');
 
+  // 10. 忘记密码入口与恢复码表单
+  await cdp.click('忘记密码');
+  await sleep(500);
+  body = await cdp.text();
+  assert(body.includes('恢复码') && body.includes('新密码'), '找回密码表单未渲染');
+  await cdp.shot('09-recover');
+  console.log('✓ 忘记密码入口可用');
+
   assert(cdp.errors.length === 0, `控制台出现错误：${cdp.errors.join(' | ')}`);
   console.log('✓ 浏览器控制台无报错');
 

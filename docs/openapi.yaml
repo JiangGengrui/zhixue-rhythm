@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: 智学节律 API
+  version: 0.3.0
+  description: |
+    MVP 后端契约。所有写操作按用户隔离；错误统一返回 `{ error: { code, message } }`。
+    认证使用 HttpOnly Cookie `zx_sid`（30 天），无需在请求头传 token。
+servers:
+  - url: http://localhost:8787
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: zx_sid
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: E1004 }
+            message: { type: string, example: 预估工时需在 5~1440 之间 }
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+    Goal:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        deadline: { type: string, example: '2026-12-19' }
+        weeklyMinutes: { type: integer, example: 900 }
+        level: { type: string, enum: [zero, once, twice, more] }
+        createdAt: { type: string }
+    PlanItem:
+      type: object
+      properties:
+        id: { type: string }
+        goalId: { type: string }
+        title: { type: string }
+        subject: { type: string, enum: [math, major, english, politics, other] }
+        estimateMin: { type: integer }
+        remainingMin: { type: integer, description: 剩余工时，未完成部分会继续排程 }
+        weight: { type: integer, minimum: 1, maximum: 5 }
+    Block:
+      type: object
+      properties:
+        id: { type: string }
+        itemId: { type: string }
+        date: { type: string }
+        startMin: { type: integer, description: 距 00:00 的分钟数 }
+        endMin: { type: integer }
+        isBuffer: { type: boolean }
+        status: { type: string, enum: [pending, running, done, skipped] }
+        actualMin: { type: integer, nullable: true }
+        skipReason: { type: string, nullable: true, enum: [interrupt, capacity, other] }
+paths:
+  /api/auth/register:
+    post:
+      summary: 注册并建立会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+      responses:
+        '200':
+          description: 同时返回一次性恢复码（仅此一次明文）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  recoveryCode: { type: string, example: ABCD-EFGH-JK }
+        '409': { description: 邮箱已注册 }
+  /api/auth/login:
+    post:
+      summary: 登录（同 IP 每分钟最多 10 次）
+      responses:
+        '200': { description: 建立会话 }
+        '401': { description: 邮箱或密码不正确 }
+        '429': { description: 尝试过于频繁 }
+  /api/auth/recover:
+    post:
+      summary: 用恢复码重置密码（成功后恢复码轮换、所有旧会话失效）
+      responses:
+        '200':
+          description: 返回新的恢复码
+        '400': { description: 邮箱或恢复码不正确 }
+  /api/auth/password:
+    post:
+      summary: 修改密码（旧会话全部失效，当前设备保留登录）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+        '400': { description: 旧密码不正确或新密码不合规 }
+  /api/auth/logout:
+    post:
+      summary: 登出并销毁会话
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+  /api/state:
+    get:
+      summary: 当前用户全量状态（目标、计划项、任务块、设置）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+        '401': { description: 未登录 }
+  /api/goal:
+    put:
+      summary: 新建或更新目标（单用户唯一）
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Goal' }
+      responses:
+        '200': { description: 成功 }
+  /api/items:
+    post:
+      summary: 添加计划项
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanItem' }
+      responses:
+        '200': { description: 成功 }
+        '409': { description: 尚未创建目标 }
+  /api/items/{id}:
+    delete:
+      summary: 删除计划项并级联清理其任务块
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 成功 }
+        '404': { description: 不存在或不属于当前用户 }
+  /api/settings:
+    put:
+      summary: 更新每周可用时段与周起始日
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+  /api/plan/generate:
+    post:
+      summary: 生成某周计划（只补排本周没有块的任务，超出单日容量自动拆分到多天）
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekStart]
+              properties:
+                weekStart: { type: string, example: '2026-11-02' }
+                from: { type: string, description: 排程起始日，默认 weekStart }
+      responses:
+        '200':
+          description: blocks + 容量统计 + 溢出项 + 建议
+  /api/report:
+    get:
+      summary: 服务端计算周报（达成率 / 有效时长 / 偏差中位与 P90 / 归因）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: week, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 周报结果 }
+  /api/blocks:
+    put:
+      summary: 覆盖写入某周任务块（同日时间不得重叠）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+        '400': { description: 日期越界、时间重叠或任务不属于当前用户 }
+  /api/blocks/{id}:
+    patch:
+      summary: 打卡状态迁移或同周移动时间
+      description: 传 `status` 为状态迁移（带 `opId` 幂等）；传 `date`/`startMin` 为移动，时长保持不变。
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 成功 }
+        '400': { description: 非法迁移、时间重叠或跨周 }
+        '404': { description: 不存在或不属于当前用户 }
+    delete:
+      summary: 删除单个任务块（任务回到待排池）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+  /api/export:
+    get:
+      summary: 导出数据
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        '200': { description: 文件下载（Content-Disposition: attachment） }
+  /api/account:
+    delete:
+      summary: 注销账号（校验密码后级联删除全部数据）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: 成功 }
+        '400': { description: 密码不正确 }

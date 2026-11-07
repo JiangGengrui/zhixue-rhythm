@@ -95,8 +95,8 @@ function safeWeekdays(raw) {
 /** 登录失败限流：同一 IP 每分钟最多 10 次 */
 const attempts = new Map();
 
-export function allowLogin(ip) {
-  const key = String(ip || 'unknown');
+export function allowLogin(ip, scope = 'login') {
+  const key = `${scope}:${String(ip || 'unknown')}`;
   const now = Date.now();
   const bucket = attempts.get(key) ?? [];
   const fresh = bucket.filter((t) => now - t < 60000);
@@ -107,6 +107,32 @@ export function allowLogin(ip) {
   fresh.push(now);
   attempts.set(key, fresh);
   return true;
+}
+
+/** 生成一次性恢复码：去掉易混淆字符，形如 ABCD-EFGH-JK */
+export function generateRecoveryCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(10);
+  let out = '';
+  for (let i = 0; i < 10; i++) {
+    out += alphabet[bytes[i] % alphabet.length];
+    if (i === 3 || i === 7) out += '-';
+  }
+  return out;
+}
+
+/** 恢复码比较：忽略大小写与分隔符 */
+export function normalizeRecoveryCode(code) {
+  return String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export function hashRecoveryCode(code) {
+  return hashPassword(normalizeRecoveryCode(code));
+}
+
+export function verifyRecoveryCode(code, stored) {
+  if (!stored) return false;
+  return verifyPassword(normalizeRecoveryCode(code), stored);
 }
 
 export function newId(prefix) {
