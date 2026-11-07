@@ -137,6 +137,23 @@ describe('packWeek', () => {
     expect(packed.suggestions.join('')).toContain('弹性位');
   });
 
+  it('周中生成：不把任务排到 fromISO 之前', () => {
+    const packed = packWeek([item('a', 120, 5), item('b', 60, 5)], settings, weekStart, '2026-11-05');
+    expect(packed.blocks.length).toBeGreaterThan(0);
+    for (const b of packed.blocks) {
+      expect(b.date >= '2026-11-05').toBe(true);
+    }
+    // 容量只统计 fromISO 之后的工作日（周四、周五）
+    expect(packed.capacityMin).toBe(240);
+  });
+
+  it('fromISO 超出本周时无容量可用', () => {
+    const packed = packWeek([item('a', 60)], settings, weekStart, '2026-11-20');
+    expect(packed.blocks).toHaveLength(0);
+    expect(packed.capacityMin).toBe(0);
+    expect(packed.overflow).toHaveLength(1);
+  });
+
   it('本周无可排时段时全部进入 overflow', () => {
     const zero: Settings = { weekStart: 1, weekdays: [0, 0, 0, 0, 0, 0, 0] };
     const packed = packWeek([item('a', 60)], zero, weekStart);

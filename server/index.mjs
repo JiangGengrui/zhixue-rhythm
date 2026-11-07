@@ -44,6 +44,7 @@ export function startServer(options = {}) {
           body,
           res,
           user,
+          query: url.searchParams,
           ip: req.socket.remoteAddress,
         });
         if (result === undefined) throw new HttpError(404, 'E4004', '接口不存在');

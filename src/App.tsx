@@ -6,16 +6,18 @@ import { GoalPage } from './pages/GoalPage';
 import { TodayPage } from './pages/TodayPage';
 import { WeekPage } from './pages/WeekPage';
 import { ReportPage } from './pages/ReportPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { AuthPage } from './pages/AuthPage';
 import { startOfWeek, todayISO, weekDates } from './domain/date';
 
-type Tab = 'today' | 'goal' | 'week' | 'report';
+type Tab = 'today' | 'goal' | 'week' | 'report' | 'settings';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'today', label: '今日' },
   { key: 'goal', label: '目标' },
   { key: 'week', label: '周视图' },
   { key: 'report', label: '周报' },
+  { key: 'settings', label: '设置' },
 ];
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -150,6 +152,7 @@ export default function App() {
           {tab === 'goal' && <GoalPage state={state} actions={actions} />}
           {tab === 'week' && <WeekPage state={state} actions={actions} />}
           {tab === 'report' && <ReportPage state={state} />}
+          {tab === 'settings' && <SettingsPage state={state} actions={actions} />}
         </ErrorBoundary>
       </main>
 

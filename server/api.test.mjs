@@ -166,6 +166,90 @@ test('删除计划项同时清理其任务块', async () => {
   assert.equal(state.json.blocks.length, 0);
 });
 
+test('服务端生成周计划：支持从指定日期起排，并保留完成状态', async () => {
+  const { cookie } = await register('gen@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  for (const title of ['A', 'B', 'C']) {
+    await call('POST', '/api/items', { title, subject: 'major', estimateMin: 120, weight: 5 }, cookie);
+  }
+
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02', from: '2026-11-05' }, cookie);
+  assert.equal(gen.status, 200, JSON.stringify(gen.json));
+  assert.ok(gen.json.blocks.length > 0);
+  for (const b of gen.json.blocks) assert.ok(b.date >= '2026-11-05', `排到了过去：${b.date}`);
+  assert.equal(gen.json.capacityMin, 420); // 周四、周五各 150 + 周六 120
+
+  const first = gen.json.blocks[0];
+  await call('PATCH', `/api/blocks/${first.id}`, { status: 'done', actualMin: 130 }, cookie);
+  const again = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02', from: '2026-11-05' }, cookie);
+  const kept = again.json.blocks.find((b) => b.id === first.id);
+  assert.equal(kept.status, 'done');
+  assert.equal(kept.actualMin, 130);
+});
+
+test('服务端周报：指标来自真实记录且归因合计 100', async () => {
+  const { cookie } = await register('rep@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'major', estimateMin: 120, weight: 5 }, cookie);
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const block = gen.json.blocks[0];
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 150 }, cookie);
+
+  const rep = await call('GET', '/api/report?week=2026-11-02', null, cookie);
+  assert.equal(rep.status, 200);
+  assert.equal(rep.json.hasData, true);
+  assert.equal(rep.json.doneCount, 1);
+  assert.ok(Math.abs(rep.json.achievement - 1) < 1e-9);
+  assert.ok(rep.json.deviation.median > 0.2);
+  const sum = rep.json.causes.reduce((s, c) => s + c.share, 0);
+  assert.equal(sum, 100);
+
+  const empty = await call('GET', '/api/report?week=2027-01-04', null, cookie);
+  assert.equal(empty.json.hasData, false);
+});
+
+test('拒绝同一天时间重叠的任务块', async () => {
+  const { cookie } = await register('overlap@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
+  const item = await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 60, weight: 3 }, cookie);
+  const itemId = item.json.item.id;
+
+  const res = await call('PUT', '/api/blocks', {
+    weekStart: '2026-11-02',
+    blocks: [
+      { id: 'o1', itemId, date: '2026-11-02', startMin: 1140, endMin: 1200 },
+      { id: 'o2', itemId, date: '2026-11-02', startMin: 1170, endMin: 1230 },
+    ],
+  }, cookie);
+  assert.equal(res.status, 400);
+  assert.equal(res.json.error.code, 'E1022');
+});
+
+test('设置接口：校验每日时长并影响周容量', async () => {
+  const { cookie } = await register('settings@test.dev');
+
+  const bad = await call('PUT', '/api/settings', { weekStart: 1, weekdays: [0, 60, 60] }, cookie);
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.error.code, 'E1011');
+
+  const tooBig = await call('PUT', '/api/settings', { weekStart: 1, weekdays: [0, 2000, 60, 60, 60, 0, 0] }, cookie);
+  assert.equal(tooBig.status, 400);
+
+  const ok = await call('PUT', '/api/settings', { weekStart: 0, weekdays: [60, 60, 60, 60, 60, 0, 0] }, cookie);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.settings.weekStart, 0);
+
+  const state = await call('GET', '/api/state', null, cookie);
+  assert.deepEqual(state.json.settings.weekdays, [60, 60, 60, 60, 60, 0, 0]);
+
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 60, weight: 3 }, cookie);
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  assert.equal(gen.status, 200);
+  // 新容量：周一至周五各 60 → 300
+  assert.equal(gen.json.capacityMin, 300);
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

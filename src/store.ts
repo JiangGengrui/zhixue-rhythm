@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from './data/api';
 import type { SessionUser } from './data/api';
-import { packWeek } from './domain/engine';
-import { weekDates } from './domain/date';
+import { addDays, todayISO, weekDates } from './domain/date';
 import type { Block, BlockStatus, Goal, PlanItem, Settings } from './domain/types';
 
 export const defaultSettings: Settings = {
   weekStart: 1,
-  weekdays: [0, 150, 150, 150, 150, 150, 0],
+  weekdays: [0, 150, 150, 150, 150, 150, 120],
 };
 
 export type Phase = 'loading' | 'guest' | 'ready' | 'error';
@@ -156,34 +155,17 @@ export function useAppState() {
 
   const generateWeek = useCallback(async (weekStartISO: string) => {
     await run(async () => {
-      const items = state.items.filter((i) => i.goalId === state.goal?.id);
-      const packed = packWeek(items, state.settings, weekStartISO);
-      const inWeek = new Set(weekDates(weekStartISO));
-      const existing = new Map(state.blocks.filter((b) => inWeek.has(b.date)).map((b) => [b.id, b]));
-
-      // 保留已完成状态，避免重新生成丢失记录
-      const payload = packed.blocks.map((b) => {
-        const old = existing.get(b.id);
-        return {
-          id: b.id,
-          itemId: b.itemId,
-          date: b.date,
-          startMin: b.startMin,
-          endMin: b.endMin,
-          isBuffer: b.isBuffer,
-          status: old?.status ?? b.status,
-          actualMin: old?.actualMin,
-          skipReason: old?.skipReason,
-        };
-      });
-
-      const res = await api.putBlocks(weekStartISO, payload);
+      const weekEnd = addDays(weekStartISO, 6);
+      const today = todayISO();
+      const from = today >= weekStartISO && today <= weekEnd ? today : weekStartISO;
+      const res = await api.generatePlan(weekStartISO, from);
+      const inWeek = weekDates(weekStartISO);
       setState((prev) => ({
         ...prev,
-        blocks: [...prev.blocks.filter((b) => !inWeek.has(b.date)), ...res.blocks],
+        blocks: [...prev.blocks.filter((b) => !inWeek.includes(b.date)), ...res.blocks],
       }));
     });
-  }, [run, state.items, state.blocks, state.goal?.id, state.settings]);
+  }, [run]);
 
   const setBlockStatus = useCallback(
     async (id: string, status: BlockStatus, actualMin?: number, skipReason?: Block['skipReason']) => {

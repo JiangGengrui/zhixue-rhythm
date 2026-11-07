@@ -1,5 +1,6 @@
 import { allowLogin, createSession, destroySession, hashPassword, newId, sessionCookie, clearCookie, verifyPassword } from './auth.mjs';
 import { nowISO } from './db.mjs';
+import { buildReport, packWeek } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SUBJECTS = new Set(['math', 'major', 'english', 'politics', 'other']);
@@ -143,7 +144,7 @@ export function createApi(db) {
       if (q.userByEmail.get(email)) throw new HttpError(409, 'E4001', '该邮箱已注册');
 
       const id = newId('usr');
-      q.insertUser.run(id, email, name, hashPassword(password), '[0,150,150,150,150,150,0]', nowISO());
+      q.insertUser.run(id, email, name, hashPassword(password), '[0,150,150,150,150,150,120]', nowISO());
       const user = q.userById.get(id);
       const { token } = createSession(db, id);
       res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
@@ -219,6 +220,55 @@ export function createApi(db) {
       return { settings: { weekStart, weekdays: safe } };
     },
 
+    'POST /api/plan/generate': ({ user, body }) => {
+      const goal = q.goalByUser.get(user.id);
+      if (!goal) throw new HttpError(409, 'E4003', '请先创建目标');
+      const weekStart = dateStr(body.weekStart, '周起始日');
+      const weekEnd = addDays(weekStart, 6);
+      const from = body.from ? dateStr(body.from, '排程起始日') : weekStart;
+      assert(from >= weekStart && from <= weekEnd, 'E1021', '排程起始日必须落在本周');
+
+      const items = q.itemsByUser.all(user.id).map(normalizeItem).filter((i) => i.goalId === goal.id);
+      const packed = packWeek(items, user.settings, weekStart, from);
+
+      // 保留同一任务块的完成状态，避免重新生成丢失记录
+      const existing = new Map(q.blocksByWeek.all(user.id, weekStart, weekEnd).map((row) => [row.id, row]));
+
+      db.exec('BEGIN');
+      try {
+        q.deleteWeek.run(user.id, weekStart, weekEnd);
+        for (const b of packed.blocks) {
+          const old = existing.get(b.id);
+          q.insertBlock.run(
+            b.id, user.id, b.itemId, b.date, b.startMin, b.endMin, b.isBuffer ? 1 : 0,
+            old?.status ?? b.status,
+            old?.actual_min ?? null,
+            old?.skip_reason ?? null,
+            nowISO(),
+          );
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+
+      return {
+        blocks: q.blocksByWeek.all(user.id, weekStart, weekEnd).map(normalizeBlock),
+        capacityMin: packed.capacityMin,
+        plannedMin: packed.plannedMin,
+        bufferMin: packed.bufferMin,
+        suggestions: packed.suggestions,
+        overflow: packed.overflow.map((o) => ({ title: o.item.title, estimateMin: o.item.estimateMin, reason: o.reason })),
+      };
+    },
+
+    'GET /api/report': ({ user, query }) => {
+      const week = dateStr(query.get('week') ?? '', '周');
+      const blocks = q.blocksByWeek.all(user.id, week, addDays(week, 6)).map(normalizeBlock);
+      return buildReport(blocks, user.settings, week);
+    },
+
     'PUT /api/blocks': ({ user, body }) => {
       const weekStart = dateStr(body.weekStart, '周起始日');
       const blocks = body.blocks;
@@ -246,6 +296,22 @@ export function createApi(db) {
           skipReason: null,
         };
       });
+
+      // 同一天内不允许时间重叠
+      const byDate = new Map();
+      for (const b of prepared) {
+        const list = byDate.get(b.date) ?? [];
+        list.push(b);
+        byDate.set(b.date, list);
+      }
+      for (const [date, list] of byDate) {
+        list.sort((a, b) => a.start - b.start);
+        for (let i = 1; i < list.length; i++) {
+          if (list[i].start < list[i - 1].end) {
+            throw bad('E1022', `${date} 存在重叠的任务块`);
+          }
+        }
+      }
 
       db.exec('BEGIN');
       try {
@@ -289,7 +355,7 @@ export function createApi(db) {
     if (!handler) return undefined;
     const needsAuth = !key.startsWith('POST /api/auth/');
     if (needsAuth) requireUser(ctx);
-    return handler({ ...ctx, user: ctx.user });
+    return handler({ ...ctx, user: ctx.user, query: ctx.query ?? new URLSearchParams() });
   };
 
   function requireUser(ctx) {

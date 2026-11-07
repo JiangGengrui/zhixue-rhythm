@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const DEFAULT_WEEKDAYS = JSON.stringify([0, 150, 150, 150, 150, 150, 0]);
+const DEFAULT_WEEKDAYS = JSON.stringify([0, 150, 150, 150, 150, 150, 120]);
 
 export function openDb(file) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });

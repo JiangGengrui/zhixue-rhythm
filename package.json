@@ -5,16 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build:engine && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run && node --test server/api.test.mjs",
+    "test": "vitest run && npm run build:engine && node --test server/api.test.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "server": "node server/index.mjs",
-    "start": "npm run build && node server/index.mjs",
+    "server": "npm run build:engine && node server/index.mjs",
+    "start": "npm run build:engine && tsc --noEmit && vite build && node server/index.mjs",
     "test:unit": "vitest run",
-    "test:api": "node --test server/api.test.mjs",
-    "test:e2e": "node scripts/e2e.mjs"
+    "test:api": "npm run build:engine && node --test server/api.test.mjs",
+    "test:e2e": "npm run build:engine && node scripts/e2e.mjs",
+    "build:engine": "esbuild src/domain/engine.ts --bundle --format=esm --platform=neutral --outfile=server/engine.generated.mjs --log-level=warning"
   },
   "dependencies": {
     "react": "^19.0.0",

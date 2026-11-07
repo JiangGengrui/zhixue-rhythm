@@ -139,10 +139,11 @@ async function main() {
   const base = `http://127.0.0.1:${PORT}/`;
 
   // 1. 未登录：应看到登录页
-  await cdp.send('Page.navigate', { url: base });
+  await cdp.send('Page.navigate', { url: `${base}#report` });
   await sleep(1500);
   let body = await cdp.text();
   assert(body.includes('登录') && body.includes('智学节律'), '未登录时未渲染登录页');
+  assert(!body.includes('一周复盘'), '未登录却能看到周报内容');
   await cdp.shot('01-login');
   console.log('✓ 登录页渲染正常');
 
@@ -200,8 +201,7 @@ async function main() {
   await cdp.click('确认完成');
   await sleep(900);
   body = await cdp.text();
-  assert(body.includes('本周已完成'), '打卡后未出现已完成记录');
-  assert(body.includes('实际'), '打卡后未显示实际用时');
+  assert(body.includes('已完成 · 实际'), '打卡后未显示完成状态与实际用时');
   await cdp.shot('05-today-done');
   console.log('✓ 打卡与实际用时写入成功');
 
@@ -222,12 +222,42 @@ async function main() {
   assert(body.includes('达成率'), '刷新后会话或数据丢失');
   console.log('✓ 刷新后会话与数据保持');
 
-  // 8. 登出后回到登录页
+  // 8. 设置：修改每日可用时长并保存，重新生成不报错
+  await cdp.click('设置');
+  await sleep(700);
+  body = await cdp.text();
+  assert(body.includes('每周可用时间'), '设置页未渲染');
+
+  const changed = await cdp.eval(`
+    const inputs = [...document.querySelectorAll('.day-field input')];
+    if (inputs.length !== 7) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(inputs[3], '1');
+    inputs[3].dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  assert(changed, '设置页缺少 7 个每日输入');
+  await cdp.click('保存设置');
+  await sleep(900);
+  body = await cdp.text();
+  assert(body.includes('已保存'), '设置未保存成功');
+  await cdp.shot('07-settings');
+  console.log('✓ 设置保存生效');
+
+  await cdp.click('周视图');
+  await sleep(600);
+  await cdp.click('重新生成');
+  await sleep(1200);
+  body = await cdp.text();
+  assert(!body.includes('NaN'), '按新容量重新生成后出现 NaN');
+  console.log('✓ 按新容量重新生成正常');
+
+  // 9. 登出后回到登录页
   await cdp.click('退出');
   await sleep(900);
   body = await cdp.text();
   assert(body.includes('登录') && !body.includes('达 成'), '登出后未回到登录页');
-  await cdp.shot('07-logout');
+  await cdp.shot('08-logout');
   console.log('✓ 登出正常');
 
   assert(cdp.errors.length === 0, `控制台出现错误：${cdp.errors.join(' | ')}`);

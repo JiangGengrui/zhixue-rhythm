@@ -6,3 +6,4 @@ dist/
 npm-debug.log*
 data/
 artifacts/
+server/engine.generated.mjs

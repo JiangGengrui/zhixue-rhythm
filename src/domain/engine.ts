@@ -60,9 +60,14 @@ export function packWeek(
   items: PlanItem[],
   settings: Settings,
   weekStartISO: string,
+  /** 只从这一天（含）之后排程；用于周中生成时避免排到已过去的日期 */
+  fromISO: string = weekStartISO,
 ): PackedWeek {
   const dates = weekDates(weekStartISO);
-  const dayCap = dates.map((d) => Math.max(0, settings.weekdays[weekdayOf(d)] ?? 0));
+  // 早于 fromISO 的日期不参与排程（容量记为 0）
+  const dayCap = dates.map((d) =>
+    d < fromISO ? 0 : Math.max(0, settings.weekdays[weekdayOf(d)] ?? 0),
+  );
   const totalCap = dayCap.reduce((a, b) => a + b, 0);
   const bufferTotal = round(totalCap * BUFFER_RATIO);
   const normalCap = totalCap - bufferTotal;
