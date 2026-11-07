@@ -2,7 +2,7 @@
 
 真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
-**当前版本：v1.0.0（MVP 交付版）** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
+**当前版本：v1.0.1** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
 
 ## 版本历史
 
@@ -16,6 +16,16 @@
 | v0.6.0 | 账号自救与首次上线 | 恢复码找回、API 契约、操作手册 |
 | v0.7.0 | 离线可用与运维备份 | 本地操作队列（幂等补传）、备份脚本 |
 | v1.0.0 | 线上发布与验收 | 全链路线上验收、发布流程固化 |
+| v1.0.1 | 主页入口修复 | 主页回到根路径、预览块死按钮、周日空计划提示 |
+
+## 页面结构
+
+| 路径 | 页面 | 说明 |
+|---|---|---|
+| `/` | 产品主页 | 营销主页（Hero 动效、功能、理念、留言反馈），访客第一眼看到的页面 |
+| `/app.html` | 学习空间 | React 应用（登录后使用），主页「进入」跳转到这里 |
+
+> 根路径必须是产品主页——这是发布后最容易出问题的地方，路由改名前先确认这一点。
 
 ## 线上地址
 
@@ -57,7 +67,7 @@ npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
 | 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS token，无 UI 框架 |
 | 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库；登出/改密/重置密码都会失效；注册下发一次性恢复码用于找回 |
-| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 39 条自动化用例 + 17 步浏览器验收 |
+| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 41 条自动化用例 + 18 步浏览器验收 |
 | 离线 | 本地操作队列（localStorage）+ `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
 | 同构 | esbuild 把 `src/domain/engine.ts` 打成 `server/engine.generated.mjs` | 排程与周报前后端共用**同一份源码**，不存在两套算法 |
 
@@ -80,6 +90,9 @@ src/
 └── components.tsx Card / Stat / Button / Field / Empty / Meter
 scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 scripts/backup.mjs 数据库冷备（checkpoint + 保留最近 14 份）
+public/three-effects.js  主页 3D 吊牌（three.js 动态加载）
+index.html        产品主页（营销页，多页构建入口之一）
+app.html          学习空间（React 应用）
 docs/openapi.yaml  API 契约
 docs/操作手册.md    启动、备份、回滚、排障
 CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
@@ -112,7 +125,7 @@ CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 39 条通过（引擎 20 + 接口 19） |
+| `npm test` | 41 条通过（引擎 20 + 接口 21） |
 | `npx tsc --noEmit` | 0 错误 |
 | `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
 | `node scripts/e2e.mjs` | 17 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → **断网打卡 → 恢复补传** → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 忘记密码入口 → 控制台零报错 |
