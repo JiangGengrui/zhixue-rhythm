@@ -331,6 +331,77 @@ test('注销账号：密码校验、数据级联删除、会话失效', async ()
   assert.equal(relogin.status, 401, '注销后不应还能登录');
 });
 
+test('移动任务块：同周改时间、拒绝重叠与跨周', async () => {
+  const { cookie } = await register('move@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 120, weight: 5 }, cookie);
+  await call('POST', '/api/items', { title: 'B', subject: 'major', estimateMin: 120, weight: 4 }, cookie);
+
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const first = gen.json.blocks[0];
+  const second = gen.json.blocks[1];
+  // 120 + 120 分钟在每日 150 分钟容量下会被拆成 3 块
+  assert.ok(gen.json.blocks.length >= 2, '应至少生成两块');
+
+  const moved = await call('PATCH', `/api/blocks/${first.id}`, { date: '2026-11-03', startMin: 600 }, cookie);
+  assert.equal(moved.status, 200);
+  assert.equal(moved.json.block.date, '2026-11-03');
+  assert.equal(moved.json.block.startMin, 600);
+  assert.equal(moved.json.block.endMin, 720); // 时长不变
+
+  const overlap = await call('PATCH', `/api/blocks/${first.id}`, { date: second.date, startMin: second.startMin }, cookie);
+  assert.equal(overlap.status, 400);
+  assert.equal(overlap.json.error.code, 'E1024');
+
+  const crossWeek = await call('PATCH', `/api/blocks/${first.id}`, { date: '2026-11-10', startMin: 600 }, cookie);
+  assert.equal(crossWeek.status, 400);
+  assert.equal(crossWeek.json.error.code, 'E1028');
+});
+
+test('删除任务块后任务回到待排池', async () => {
+  const { cookie } = await register('unplan@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 60, weight: 5 }, cookie);
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const blockId = gen.json.blocks[0].id;
+
+  const del = await call('DELETE', `/api/blocks/${blockId}`, null, cookie);
+  assert.equal(del.status, 200);
+  let state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.blocks.length, 0);
+  assert.equal(state.json.items[0].remainingMin, 60);
+
+  const again = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  assert.equal(again.json.blocks.length, 1);
+});
+
+test('修改密码：校验旧密码、旧会话失效、新密码可登录', async () => {
+  const { cookie } = await register('pwd@test.dev');
+
+  const wrong = await call('POST', '/api/auth/password', { currentPassword: 'bad-password', newPassword: 'newpassword123' }, cookie);
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.json.error.code, 'E1025');
+
+  const same = await call('POST', '/api/auth/password', { currentPassword: 'password123', newPassword: 'password123' }, cookie);
+  assert.equal(same.status, 400);
+  assert.equal(same.json.error.code, 'E1026');
+
+  const ok = await call('POST', '/api/auth/password', { currentPassword: 'password123', newPassword: 'newpassword123' }, cookie);
+  assert.equal(ok.status, 200);
+  assert.ok(ok.cookie, '应下发新会话 Cookie');
+
+  const oldSession = await call('GET', '/api/state', null, cookie);
+  assert.equal(oldSession.status, 401, '旧会话应失效');
+
+  const fresh = await call('GET', '/api/state', null, ok.cookie);
+  assert.equal(fresh.status, 200);
+
+  const relogin = await call('POST', '/api/auth/login', { email: 'pwd@test.dev', password: 'newpassword123' });
+  assert.equal(relogin.status, 200);
+  const oldLogin = await call('POST', '/api/auth/login', { email: 'pwd@test.dev', password: 'password123' });
+  assert.equal(oldLogin.status, 401);
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

@@ -282,3 +282,10 @@ p { margin: 0; }
 .danger-zone input {
   border: 1px solid #ecd6d0; border-radius: 9px; padding: 8px 10px; background: #fff; min-width: 180px;
 }
+
+/* ── 任务块调整入口 ── */
+.slot-edit {
+  margin-top: 3px; border: 0; background: none; padding: 0; cursor: pointer;
+  font-size: 9.5px; color: #3f7a61; text-align: left; text-decoration: underline;
+}
+.slot-edit:hover { color: var(--green); }

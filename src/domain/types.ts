@@ -88,7 +88,7 @@ export interface Feasibility {
 export interface PackedWeek {
   blocks: Block[];
   /** 装不下的计划项 */
-  overflow: Array<{ item: PlanItem; reason: 'no-capacity' | 'buffer-used' }>;
+  overflow: Array<{ item: PlanItem; remainingMin?: number; reason: 'no-capacity' | 'buffer-used' }>;
   capacityMin: number;
   plannedMin: number;
   bufferMin: number;

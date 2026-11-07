@@ -12,6 +12,10 @@ export function SettingsPage({ state, actions }: { state: AppState; actions: Act
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState('');
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
   const [delMsg, setDelMsg] = useState('');
   const [delBusy, setDelBusy] = useState(false);
 
@@ -85,6 +89,54 @@ export function SettingsPage({ state, actions }: { state: AppState; actions: Act
             {busy ? '保存中…' : '保存设置'}
           </Button>
           {notice && <span className="notice">{notice}</span>}
+        </div>
+      </Card>
+
+      <Card title="修改密码" desc="修改成功后，其它设备上的登录会话会全部失效。">
+        <div className="form-grid">
+          <Field label="当前密码">
+            <input
+              type="password"
+              value={curPwd}
+              autoComplete="current-password"
+              onChange={(e) => setCurPwd(e.target.value)}
+            />
+          </Field>
+          <Field label="新密码" hint="至少 8 位">
+            <input
+              type="password"
+              value={newPwd}
+              autoComplete="new-password"
+              onChange={(e) => setNewPwd(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="row">
+          <Button
+            variant="primary"
+            disabled={pwdBusy}
+            onClick={async () => {
+              setPwdMsg('');
+              if (newPwd.length < 8) {
+                setPwdMsg('新密码至少 8 位');
+                return;
+              }
+              setPwdBusy(true);
+              try {
+                await actions.changePassword(curPwd, newPwd);
+                setCurPwd('');
+                setNewPwd('');
+                setPwdMsg('密码已更新，当前设备保持登录');
+              } catch (err) {
+                setPwdMsg(err instanceof Error ? err.message : '修改失败');
+              } finally {
+                setPwdBusy(false);
+              }
+            }}
+          >
+            {pwdBusy ? '保存中…' : '保存新密码'}
+          </Button>
+          {pwdMsg && <span className="notice">{pwdMsg}</span>}
         </div>
       </Card>
 

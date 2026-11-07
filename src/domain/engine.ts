@@ -82,43 +82,44 @@ export function packWeek(
   let usedBuffer = 0;
 
   for (const item of orderItems(items)) {
-    const est = Math.max(0, item.estimateMin);
-    if (est === 0) continue;
+    let remaining = Math.max(0, item.estimateMin);
+    if (remaining === 0) continue;
+    let seq = 0;
 
-    // 1) 优先放入常规容量（同时受全局常规容量约束）
-    let placed = false;
-    for (let i = 0; i < dates.length; i++) {
-      if (normalLeft[i]! >= est && usedNormal + est <= normalCap) {
-        const date = dates[i]!;
-        blocks.push(makeBlock(item, date, cursor[i]!, est, false));
-        cursor[i] = cursor[i]! + est;
-        normalLeft[i] = normalLeft[i]! - est;
-        usedNormal += est;
-        placed = true;
+    // 1) 优先用常规容量；超过单日容量时自动拆分到多天
+    for (let i = 0; i < dates.length && remaining > 0; i++) {
+      const avail = Math.min(normalLeft[i]!, normalCap - usedNormal);
+      if (avail <= 0) continue;
+      const take = Math.min(remaining, avail);
+      blocks.push(makeBlock(item, dates[i]!, cursor[i]!, take, false, seq++));
+      cursor[i] = cursor[i]! + take;
+      normalLeft[i] = normalLeft[i]! - take;
+      usedNormal += take;
+      remaining -= take;
+    }
+
+    // 2) 弹性位只在"整块剩余量能放下"时使用，避免同一任务被切得过碎
+    if (remaining > 0) {
+      for (let i = 0; i < dates.length; i++) {
+        const avail = Math.min(bufferLeft[i]!, bufferTotal - usedBuffer);
+        if (avail < remaining) continue;
+        blocks.push(makeBlock(item, dates[i]!, cursor[i]!, remaining, true, seq++));
+        cursor[i] = cursor[i]! + remaining;
+        bufferLeft[i] = bufferLeft[i]! - remaining;
+        usedBuffer += remaining;
+        remaining = 0;
         break;
       }
     }
-    if (placed) continue;
 
-    // 2) 常规容量不够时使用弹性位（同样受弹性位总量约束）
-    for (let i = 0; i < dates.length; i++) {
-      if (bufferLeft[i]! >= est && usedBuffer + est <= bufferTotal) {
-        const date = dates[i]!;
-        blocks.push(makeBlock(item, date, cursor[i]!, est, true));
-        cursor[i] = cursor[i]! + est;
-        bufferLeft[i] = bufferLeft[i]! - est;
-        usedBuffer += est;
-        placed = true;
-        break;
-      }
+    // 3) 仍有剩余：记为溢出，剩余量会留到下一周
+    if (remaining > 0) {
+      overflow.push({
+        item,
+        remainingMin: remaining,
+        reason: usedNormal + usedBuffer >= totalCap ? 'no-capacity' : 'buffer-used',
+      });
     }
-    if (placed) continue;
-
-    // 3) 装不下
-    overflow.push({
-      item,
-      reason: usedNormal + usedBuffer >= totalCap ? 'no-capacity' : 'buffer-used',
-    });
   }
 
   blocks.sort((a, b) => (a.date === b.date ? a.startMin - b.startMin : a.date < b.date ? -1 : 1));
@@ -127,7 +128,7 @@ export function packWeek(
   const suggestions: string[] = [];
 
   if (overflow.length > 0) {
-    const missing = overflow.reduce((s, o) => s + Math.max(0, o.item.estimateMin), 0);
+    const missing = overflow.reduce((s, o) => s + Math.max(0, o.remainingMin ?? o.item.estimateMin), 0);
     suggestions.push(
       `本周还差 ${Math.round(missing / 60)} 小时容量：可把低权重项顺延到下周，或把每日可用时长上调。`,
     );
@@ -154,9 +155,17 @@ export function packWeek(
   };
 }
 
-function makeBlock(item: PlanItem, date: string, startMin: number, duration: number, isBuffer: boolean): Block {
+function makeBlock(
+  item: PlanItem,
+  date: string,
+  startMin: number,
+  duration: number,
+  isBuffer: boolean,
+  seq = 0,
+): Block {
   return {
-    id: `blk_${date}_${item.id}`,
+    // 序号用于区分同一任务在同一天的多个分片（常规位 + 弹性位），保证 id 唯一
+    id: `blk_${date}_${item.id}_${seq}`,
     itemId: item.id,
     date,
     startMin,

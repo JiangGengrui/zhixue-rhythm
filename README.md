@@ -25,7 +25,7 @@ npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
 | 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS token，无 UI 框架 |
 | 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出即失效 |
-| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 34 条自动化用例 + 12 步浏览器验收 |
+| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 38 条自动化用例 + 14 步浏览器验收 |
 | 同构 | esbuild 把 `src/domain/engine.ts` 打成 `server/engine.generated.mjs` | 排程与周报前后端共用**同一份源码**，不存在两套算法 |
 
 > 说明：架构文档原定 Go + Postgres。当前环境无 Go/Postgres，为满足"一条命令可运行"，后端先用 Node + SQLite 实现，**接口契约与领域规则保持不变**，后续平移 Go 时前端无需改动。
@@ -62,7 +62,9 @@ scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 | POST | `/api/plan/generate` | 服务端生成某周计划：`from` 从今天起排；只补排没有块的任务，已完成记录不被覆盖；跨周已排任务不重复排 |
 | GET | `/api/report?week=` | 服务端计算周报（达成率/时长/偏差/归因） |
 | PUT | `/api/blocks` | 覆盖某周任务块（校验同日不重叠） |
-| PATCH | `/api/blocks/:id` | 打卡状态迁移，带 `opId` 幂等；完成时按实际投入扣减任务剩余工时 |
+| PATCH | `/api/blocks/:id` | 打卡状态迁移（带 `opId` 幂等）或**同周移动时间**（改 `date`/`startMin`，时长不变，拒绝重叠与跨周）；完成时按实际投入扣减剩余工时 |
+| DELETE | `/api/blocks/:id` | 删除单个任务块，任务回到待排池 |
+| POST | `/api/auth/password` | 修改密码：校验旧密码，旧会话全部失效并下发新会话 |
 | GET | `/api/export?format=json\|csv` | 导出全部数据（JSON）或任务记录（CSV，带 BOM） |
 | DELETE | `/api/account` | 注销账号：校验密码、级联删除数据、会话失效 |
 
@@ -72,17 +74,17 @@ scripts/e2e.mjs    真实 Chrome 走完整链路并截图
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 34 条通过（引擎 19 + 接口 15） |
+| `npm test` | 38 条通过（引擎 20 + 接口 18） |
 | `npx tsc --noEmit` | 0 错误 |
 | `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
-| `node scripts/e2e.mjs` | 12 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 打卡 → 服务端周报 → 刷新保持 → 改设置 → 按新容量重排 → 登出 → 控制台零报错 |
+| `node scripts/e2e.mjs` | 14 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 控制台零报错 |
 
 安全边界：所有查询按 `user_id` 过滤；越权改他人任务块返回 404；计划项不能跨用户塞入；口令与 Cookie 不落日志；请求体上限 1MB；密码错 10 次/分钟限流。
 
 ## 已知限制（下一轮处理）
 
-1. 无找回密码 / 邮箱验证流程。
+1. 无"忘记密码"自助找回（需邮箱通道）；只能登录后修改密码。
 2. 无离线队列与多端冲突合并（当前以服务端为准，后写覆盖）。
-3. 重排只补排"本周还没有块"的任务；已排任务若想改时间，目前只能删除后重新生成。
-4. 装不下的任务不在同一周内自动拆分到多天，需等下一周剩余工时自然进入排程。
+3. 「补排新任务」只处理本周还没有块的任务；调整时间请用任务块上的「调整」。
+4. 弹性位只在剩余量能整块放下时使用，极端情况下会留出未利用的弹性时间（保证不把任务切碎）。
 5. 后端为 Node + SQLite（环境无 Go/Postgres），契约已固化以便后续平移。

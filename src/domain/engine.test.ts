@@ -115,10 +115,23 @@ describe('packWeek', () => {
     expect(one).toEqual(two);
   });
 
-  it('装不下时进入 overflow 并给出建议', () => {
-    const packed = packWeek([item('huge', 600)], settings, weekStart);
-    expect(packed.blocks).toHaveLength(0);
+  it('长任务自动拆分到多天', () => {
+    const packed = packWeek([item('long', 500)], settings, weekStart);
+    expect(packed.blocks.length).toBeGreaterThan(1);
+    expect(packed.plannedMin).toBe(500);
+    expect(packed.overflow).toHaveLength(0);
+    // 每天不超过当日容量，且不重叠
+    for (const b of packed.blocks) {
+      expect(b.endMin - b.startMin).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it('总容量不足时溢出剩余量并给出建议', () => {
+    const packed = packWeek([item('huge', 700)], settings, weekStart);
+    // 常规容量 510 用满；剩余 190 超过单日弹性位，不切片 → 整体溢出
+    expect(packed.plannedMin).toBe(510);
     expect(packed.overflow).toHaveLength(1);
+    expect(packed.overflow[0]!.remainingMin).toBe(190);
     expect(packed.suggestions.join('')).toContain('差');
   });
 
@@ -132,7 +145,8 @@ describe('packWeek', () => {
       item('e', 60, 5),
     ];
     const packed = packWeek(items, settings, weekStart);
-    expect(packed.bufferMin).toBe(60);
+    // 常规 510 用满后，最后 60 分钟里 30 分钟进常规、30 分钟进弹性位
+    expect(packed.bufferMin).toBe(30);
     expect(packed.blocks.filter((b) => b.isBuffer)).toHaveLength(1);
     expect(packed.suggestions.join('')).toContain('弹性位');
   });

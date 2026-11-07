@@ -110,6 +110,10 @@ export function createApi(db) {
       "SELECT DISTINCT item_id FROM blocks WHERE user_id = ? AND status IN ('pending','running') AND (date < ? OR date > ?)",
     ),
     sessionsOfUser: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+    updatePassword: db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?'),
+    blocksByDate: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date = ?'),
+    moveBlock: db.prepare('UPDATE blocks SET date = ?, start_min = ?, end_min = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
+    deleteBlock: db.prepare('DELETE FROM blocks WHERE id = ? AND user_id = ?'),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     itemById: db.prepare('SELECT * FROM items WHERE id = ? AND user_id = ?'),
     deleteItem: db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?'),
@@ -180,6 +184,24 @@ export function createApi(db) {
     },
 
     'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+
+    'POST /api/auth/password': ({ user, body, res }) => {
+      const current = String(body?.currentPassword ?? '');
+      const next = String(body?.newPassword ?? '');
+      const row = q.userById.get(user.id);
+      if (!row) throw unauthorized();
+      if (!verifyPassword(current, row.pass_hash)) throw new HttpError(400, 'E1025', '当前密码不正确');
+      assert(next.length >= 8, 'E1007', '新密码至少 8 位');
+      assert(next.length <= 72, 'E1007', '新密码不能超过 72 位');
+      assert(next !== current, 'E1026', '新密码不能与当前密码相同');
+
+      q.updatePassword.run(hashPassword(next), user.id);
+      // 所有旧会话失效，并为当前设备重新建立会话
+      q.sessionsOfUser.run(user.id);
+      const { token } = createSession(db, user.id);
+      res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
+      return { ok: true };
+    },
 
     'GET /api/export': ({ user, query, res }) => {
       const format = String(query.get('format') ?? 'json').toLowerCase();
@@ -348,7 +370,11 @@ export function createApi(db) {
         bufferMin: allBlocks.filter((b) => b.isBuffer).reduce((sum, b) => sum + (b.endMin - b.startMin), 0),
         added: packed.blocks.length,
         suggestions: packed.suggestions,
-        overflow: packed.overflow.map((o) => ({ title: o.item.title, estimateMin: o.item.estimateMin, reason: o.reason })),
+        overflow: packed.overflow.map((o) => ({
+          title: o.item.title,
+          estimateMin: o.remainingMin ?? o.item.estimateMin,
+          reason: o.reason,
+        })),
       };
     },
 
@@ -435,6 +461,12 @@ export function createApi(db) {
     const blockMatch = path.match(/^\/api\/blocks\/([\w-]+)$/);
     if (blockMatch) {
       const user = requireUser(ctx);
+      if (method === 'DELETE') {
+        const block = q.blockById.get(blockMatch[1], user.id);
+        if (!block) throw notFound();
+        q.deleteBlock.run(block.id, user.id);
+        return { ok: true };
+      }
       if (method !== 'PATCH') throw new HttpError(405, 'E1000', '方法不支持');
       return patchBlock(user, blockMatch[1], ctx.body);
     }
@@ -455,6 +487,29 @@ export function createApi(db) {
   function patchBlock(user, id, body) {
     const block = q.blockById.get(id, user.id);
     if (!block) throw notFound();
+
+    // 移动：改日期/开始时间，时长保持不变
+    if (body && (body.date !== undefined || body.startMin !== undefined)) {
+      const date = dateStr(body.date ?? block.date, '日期');
+      const start = int(body.startMin ?? block.start_min, '开始时间', 0, 1439);
+      const duration = block.end_min - block.start_min;
+      const end = start + duration;
+      if (end > 1440) throw bad('E1027', '结束时间不能超过 24:00');
+
+      const weekStart = startOfWeekISO(block.date);
+      const weekEnd = addDays(weekStart, 6);
+      if (date < weekStart || date > weekEnd) throw bad('E1028', '只能在同一个周内移动任务');
+
+      const others = q.blocksByDate.all(user.id, date).filter((row) => row.id !== id);
+      for (const row of others) {
+        if (start < row.end_min && row.start_min < end) {
+          throw bad('E1024', '该时间段与已有任务重叠');
+        }
+      }
+
+      q.moveBlock.run(date, start, end, nowISO(), id, user.id);
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
+    }
 
     const opId = typeof body.opId === 'string' ? body.opId.slice(0, 64) : '';
     if (opId) {
@@ -491,6 +546,12 @@ export function createApi(db) {
     }
     return { block: normalizeBlock(q.blockById.get(id, user.id)) };
   }
+}
+
+function startOfWeekISO(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  const offset = (d.getDay() + 6) % 7; // 周一为一周起点
+  return addDays(iso, -offset);
 }
 
 function weekWeekCapacity(settings, weekStart) {

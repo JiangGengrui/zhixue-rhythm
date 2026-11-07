@@ -45,6 +45,9 @@ export interface Actions {
   ) => Promise<void>;
   seedDemo: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
+  moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
+  deleteBlock: (id: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : '操作失败，请稍后重试');
@@ -204,6 +207,24 @@ export function useAppState() {
     });
   }, [run, load]);
 
+  const moveBlock = useCallback(async (id: string, input: { date: string; startMin: number }) => {
+    await run(async () => {
+      const res = await api.moveBlock(id, input);
+      setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+    });
+  }, [run]);
+
+  const deleteBlock = useCallback(async (id: string) => {
+    await run(async () => {
+      await api.deleteBlock(id);
+      setState((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
+    });
+  }, [run]);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    await api.changePassword(currentPassword, newPassword);
+  }, []);
+
   const deleteAccount = useCallback(async (password: string) => {
     await api.deleteAccount(password);
     setState(emptyState);
@@ -217,6 +238,7 @@ export function useAppState() {
     actions: {
       login, register, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
+      moveBlock, deleteBlock, changePassword,
     } satisfies Actions,
   };
 }

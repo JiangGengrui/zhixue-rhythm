@@ -184,6 +184,27 @@ async function main() {
   await cdp.shot('04-week');
   console.log('✓ 周计划已生成并落库');
 
+  // 4b. 调整任务时间（同周内移动）
+  await cdp.click('调整');
+  await sleep(500);
+  body = await cdp.text();
+  assert(body.includes('调整任务时间'), '调整面板未出现');
+  await cdp.eval(`
+    const input = document.querySelector('.form-grid input[type="time"]');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '06:00');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await cdp.click('保存');
+  await sleep(900);
+  body = await cdp.text();
+  assert(body.includes('已调整任务时间'), '调整后未提示成功');
+  assert(body.includes('06:00'), '调整后的时间未显示');
+  await cdp.shot('04b-week-moved');
+  console.log('✓ 任务块同周移动成功');
+
   // 5. 今日 → 完成一项任务（填写实际用时）
   await cdp.click('今日');
   await sleep(700);
@@ -246,9 +267,28 @@ async function main() {
   await cdp.shot('07-settings');
   console.log('✓ 设置保存生效');
 
+  // 8b. 修改密码（当前设备保持登录）
+  const pwdFilled = await cdp.eval(`
+    const inputs = [...document.querySelectorAll('.form-grid input[type="password"]')];
+    if (inputs.length < 2) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(inputs[0], 'password123');
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+    setter.call(inputs[1], 'newpassword456');
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  assert(pwdFilled, '未找到修改密码输入框');
+  await cdp.click('保存新密码');
+  await sleep(1000);
+  body = await cdp.text();
+  assert(body.includes('密码已更新'), '修改密码未成功');
+  await cdp.shot('07b-password');
+  console.log('✓ 修改密码成功且当前会话保持');
+
   await cdp.click('周视图');
   await sleep(600);
-  await cdp.click('重新生成');
+  await cdp.click('补排新任务');
   await sleep(1200);
   body = await cdp.text();
   assert(!body.includes('NaN'), '按新容量重新生成后出现 NaN');

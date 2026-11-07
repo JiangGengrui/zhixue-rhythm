@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, Empty, Meter, Stat } from '../components';
+import { Button, Card, Empty, Field, Meter, Stat } from '../components';
 import { packWeek } from '../domain/engine';
 import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import { SUBJECT_LABEL } from '../domain/types';
@@ -7,9 +7,19 @@ import type { AppState, Actions } from '../store';
 
 const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
+const toTime = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+const toMinutes = (value: string) => {
+  const [h, m] = value.split(':').map(Number);
+  return Math.max(0, Math.min(1439, (h ?? 0) * 60 + (m ?? 0)));
+};
+
 export function WeekPage({ state, actions }: { state: AppState; actions: Actions }) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(todayISO(), state.settings.weekStart));
   const [notice, setNotice] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('19:00');
+  const [editError, setEditError] = useState('');
 
   const items = useMemo(
     () => state.items.filter((i) => i.goalId === state.goal?.id),
@@ -26,11 +36,11 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const saved = state.blocks.filter((b) => dates.includes(b.date));
   const hasSaved = saved.length > 0;
   const shown = hasSaved ? saved : packed.blocks;
-  const isPreview = !hasSaved;
 
   const capacity = dates.reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0);
   const plannedMin = shown.reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const bufferMin = shown.filter((b) => b.isBuffer).reduce((s, b) => s + (b.endMin - b.startMin), 0);
+  const editing = saved.find((b) => b.id === editingId) ?? null;
 
   if (!state.goal || items.length === 0) {
     return (
@@ -40,11 +50,20 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
     );
   }
 
+  function startEdit(blockId: string) {
+    const block = saved.find((b) => b.id === blockId);
+    if (!block) return;
+    setEditingId(blockId);
+    setEditDate(block.date);
+    setEditTime(toTime(block.startMin));
+    setEditError('');
+  }
+
   return (
     <div className="stack">
       <Card
         title={`${weekStart} — ${addDays(weekStart, 6)}`}
-        desc={isPreview ? '以下为预览，点击「生成本周计划」后写入' : `已完成 ${saved.filter((b) => b.status === 'done').length} 项`}
+        desc={hasSaved ? `已完成 ${saved.filter((b) => b.status === 'done').length} 项` : '以下为预览，点击「生成本周计划」后写入'}
         action={
           <div className="row">
             <Button onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="上一周">
@@ -80,15 +99,73 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           <Button
             variant="primary"
             onClick={() => {
-              actions.generateWeek(weekStart);
-              setNotice('已生成本周计划');
+              void actions.generateWeek(weekStart).then(() => setNotice('已生成（只补排本周还没有块的任务）'));
             }}
           >
-            {hasSaved ? '重新生成（保留完成状态）' : '生成本周计划'}
+            {hasSaved ? '补排新任务' : '生成本周计划'}
           </Button>
           {notice && <span className="notice">{notice}</span>}
         </div>
       </Card>
+
+      {editing && (
+        <Card
+          title="调整任务时间"
+          desc={`${itemMap.get(editing.itemId)?.title ?? '任务'} · 时长 ${fmtDuration(editing.endMin - editing.startMin)}（不可在此修改）`}
+        >
+          <div className="form-grid">
+            <Field label="日期">
+              <select value={editDate} onChange={(e) => setEditDate(e.target.value)}>
+                {dates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}（{WEEKDAY_LABEL[weekdayOf(d)]}）
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="开始时间" hint="结束时间按原时长自动顺延">
+              <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
+            </Field>
+          </div>
+          <div className="row">
+            <Button
+              variant="primary"
+              onClick={() => {
+                setEditError('');
+                void actions
+                  .moveBlock(editing.id, { date: editDate, startMin: toMinutes(editTime) })
+                  .then(() => {
+                    setEditingId(null);
+                    setNotice('已调整任务时间');
+                  })
+                  .catch((err: unknown) => setEditError(err instanceof Error ? err.message : '调整失败'));
+              }}
+            >
+              保存
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (!confirm('删除这个任务块？任务会回到待排状态。')) return;
+                setEditError('');
+                void actions
+                  .deleteBlock(editing.id)
+                  .then(() => {
+                    setEditingId(null);
+                    setNotice('已删除，任务回到待排');
+                  })
+                  .catch((err: unknown) => setEditError(err instanceof Error ? err.message : '删除失败'));
+              }}
+            >
+              删除任务块
+            </Button>
+            <Button variant="quiet" onClick={() => setEditingId(null)}>
+              取消
+            </Button>
+          </div>
+          {editError && <span className="warn">{editError}</span>}
+        </Card>
+      )}
 
       <div className="week-grid">
         {dates.map((date) => {
@@ -108,6 +185,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
                 ) : (
                   dayBlocks.map((b) => {
                     const item = itemMap.get(b.itemId);
+                    const movable = b.status === 'pending' || b.status === 'running';
                     return (
                       <div
                         key={b.id}
@@ -121,6 +199,11 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
                           {b.isBuffer ? ' · 弹性' : ''}
                         </small>
                         {item && <span className="slot-subject">{SUBJECT_LABEL[item.subject]}</span>}
+                        {movable && (
+                          <button type="button" className="slot-edit" onClick={() => startEdit(b.id)}>
+                            调整
+                          </button>
+                        )}
                       </div>
                     );
                   })
@@ -132,13 +215,15 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
       </div>
 
       {packed.overflow.length > 0 && (
-        <Card title={`装不下的计划项（${packed.overflow.length}）`} desc="当前容量不足，需要做取舍。">
+        <Card title={`装不下的计划项（${packed.overflow.length}）`} desc="容量不足，剩余部分会留到下一周。">
           <ul className="item-list">
             {packed.overflow.map((o) => (
               <li key={o.item.id}>
                 <strong>{o.item.title}</strong>
-                <span className="muted">{fmtDuration(o.item.estimateMin)}</span>
-                <Button variant="quiet" onClick={() => actions.removeItem(o.item.id)}>
+                <span className="muted">
+                  剩余 {fmtDuration(o.remainingMin ?? o.item.estimateMin)}
+                </span>
+                <Button variant="quiet" onClick={() => void actions.removeItem(o.item.id)}>
                   移除
                 </Button>
               </li>
@@ -149,9 +234,15 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
 
       <Card title="排程说明">
         <ul className="bullets">
-          {packed.suggestions.map((s) => (
-            <li key={s}>{s}</li>
-          ))}
+          {hasSaved ? (
+            <>
+              <li>本周已生成 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
+              <li>已完成或已调整的块不会被「补排新任务」覆盖。</li>
+            </>
+          ) : (
+            packed.suggestions.map((s) => <li key={s}>{s}</li>)
+          )}
+          <li>超过单日容量的任务会自动拆分到多天，不丢工作量。</li>
         </ul>
       </Card>
     </div>
