@@ -8,6 +8,17 @@ https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ
 
 > 该应用与早期静态 demo 共用同一个平台应用记录，发布新版本会覆盖原 demo 页面（demo 源码仍保留在 `../web-demo`）。
 
+## 部署到线上
+
+已发布为 Node HTTP 服务，平台启动命令必须走 npm 脚本（`vite` 不在 PATH 中，直接写 `vite build` 会启动失败）：
+
+```
+语言：node
+启动命令：npm start        # = build:engine → tsc --noEmit → vite build → node server/index.mjs
+```
+
+发布前注意：本地 `data/` 目录不要一起上传，否则会把本地测试账号带到线上（发布前先移走）。
+
 ## 快速开始
 
 ```bash
