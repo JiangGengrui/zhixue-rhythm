@@ -1,8 +1,8 @@
 /**
  * three-effects.js — 页面物理交互组件（原生移植版）
- *  - 玻璃吊牌（Lanyard 区）：2D Canvas 绘制的半透明卡片，可拖拽，弹簧惯性 + 边界回弹
+ *  - 玻璃卡（Lanyard 区）：2D Canvas 绘制的半透明卡片，可拖拽，惯性滑行 + 边界回弹
  *  - Ballpit：3D 刚体球堆（仅当页面存在 #ballpit-layer 时才加载 three.js）
- * 依赖：玻璃吊牌零依赖；Ballpit 需要 three.js（CDN ES Module），加载失败静默降级。
+ * 依赖：玻璃卡零依赖；Ballpit 需要 three.js（CDN ES Module），加载失败静默降级。
  */
 
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
@@ -22,7 +22,7 @@ const start = () => {
       });
   }
 
-  /* ══════════════════ 玻璃卡：可拖拽的半透明吊牌（2D Canvas） ══════════════════ */
+  /* ══════════════════ 玻璃卡：可拖拽的半透明卡片（2D Canvas） ══════════════════ */
   function initCard(host) {
     const cv = document.createElement('canvas');
     cv.setAttribute('aria-hidden', 'true');
@@ -33,10 +33,8 @@ const start = () => {
     let W = 1;
     let H = 1;
     let DPR = 1;
-    let cw = 210; // 卡片宽（CSS px）
-    let ch = 130; // 卡片高
-    let anchor = { x: 0, y: 0 };
-    let rest = { x: 0, y: 0 };
+    let cw = 190;
+    let ch = 118;
     const pos = { x: 0, y: 0 };
     const vel = { x: 0, y: 0 };
     let rot = 0;
@@ -45,20 +43,24 @@ const start = () => {
     let placed = false;
     let interacted = false;
     let time = 0;
-    const pointer = { x: 0, y: 0, inside: false };
+    const pointer = { x: 0, y: 0 };
     let dragging = false;
     let grab = { x: 0, y: 0 };
     let prev = performance.now();
     let raf = 0;
     let visible = true;
 
-    const MAX_ROT = 0.12; // 最大倾斜，避免贴边时被裁切
+    const MAX_ROT = 0.1;
     const RADIUS = 18;
+
+    function clamp(v, a, b) {
+      return v < a ? a : v > b ? b : v;
+    }
 
     /* ── 尺寸与边界 ── */
     function bounds() {
       const hw = cw / 2 + (ch / 2) * Math.sin(MAX_ROT) + 4;
-      const hh = ch / 2 + (cw / 2) * Math.sin(MAX_ROT) + 10; // 顶部挂环也算进去
+      const hh = ch / 2 + (cw / 2) * Math.sin(MAX_ROT) + 4;
       return { minX: hw, maxX: W - hw, minY: hh, maxY: H - hh };
     }
 
@@ -72,15 +74,13 @@ const start = () => {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
 
-      cw = Math.max(168, Math.min(224, W * 0.68));
-      ch = cw / 1.62;
-      anchor = { x: W * 0.5, y: H * 0.05 };
-      rest = { x: W * 0.5, y: H * 0.56 };
+      cw = Math.max(150, Math.min(196, W * 0.58));
+      ch = cw * 0.62;
 
       if (!placed || !interacted) {
-        // 容器尺寸稳定前不认第一次布局，避免初始落点被夹到顶边
-        pos.x = rest.x;
-        pos.y = rest.y;
+        // 容器尺寸稳定前不认第一次布局
+        pos.x = W * 0.5;
+        pos.y = H * 0.5;
         placed = true;
       }
       const b = bounds();
@@ -88,25 +88,18 @@ const start = () => {
       pos.y = clamp(pos.y, b.minY, b.maxY);
     }
 
-    /* ── 物理 ── */
-    function clamp(v, a, b) {
-      return v < a ? a : v > b ? b : v;
-    }
-
+    /* ── 物理：无吊线，松手后带惯性滑行并在四边回弹 ── */
     function bump(speed) {
       squash = Math.min(0.8, Math.abs(speed) / 1600 + 0.16);
     }
 
     function step(dt) {
       const b = bounds();
-      const swayX = rest.x + Math.sin(time * 0.75) * 2.6;
-      const swayY = rest.y + Math.sin(time * 1.15) * 2.0;
 
       if (dragging) {
-        // 带阻尼地追指针，松手后自然保留速度
         const tx = clamp(pointer.x + grab.x, b.minX, b.maxX);
         const ty = clamp(pointer.y + grab.y, b.minY, b.maxY);
-        const k = 1 - Math.exp(-dt * 20);
+        const k = 1 - Math.exp(-dt * 22);
         const nx = pos.x + (tx - pos.x) * k;
         const ny = pos.y + (ty - pos.y) * k;
         vel.x = (nx - pos.x) / Math.max(dt, 1e-3);
@@ -114,50 +107,31 @@ const start = () => {
         pos.x = nx;
         pos.y = ny;
       } else {
-        const ax = (swayX - pos.x) * 24 - vel.x * 7.2;
-        const ay = (swayY - pos.y) * 24 - vel.y * 7.2;
-        vel.x += ax * dt;
-        vel.y += ay * dt;
+        // 阻尼滑行
+        const damp = Math.exp(-dt * 2.1);
+        vel.x *= damp;
+        vel.y *= damp;
         pos.x += vel.x * dt;
         pos.y += vel.y * dt;
 
-        // 撞墙回弹
         if (pos.x < b.minX) {
           pos.x = b.minX;
-          if (vel.x < 0) {
-            bump(vel.x);
-            vel.x = -vel.x * 0.58;
-            vel.y *= 0.95;
-          }
+          if (vel.x < 0) { bump(vel.x); vel.x = -vel.x * 0.56; vel.y *= 0.94; }
         } else if (pos.x > b.maxX) {
           pos.x = b.maxX;
-          if (vel.x > 0) {
-            bump(vel.x);
-            vel.x = -vel.x * 0.58;
-            vel.y *= 0.95;
-          }
+          if (vel.x > 0) { bump(vel.x); vel.x = -vel.x * 0.56; vel.y *= 0.94; }
         }
         if (pos.y < b.minY) {
           pos.y = b.minY;
-          if (vel.y < 0) {
-            bump(vel.y);
-            vel.y = -vel.y * 0.55;
-            vel.x *= 0.95;
-          }
+          if (vel.y < 0) { bump(vel.y); vel.y = -vel.y * 0.54; vel.x *= 0.94; }
         } else if (pos.y > b.maxY) {
           pos.y = b.maxY;
-          if (vel.y > 0) {
-            bump(vel.y);
-            vel.y = -vel.y * 0.55;
-            vel.x *= 0.95;
-          }
+          if (vel.y > 0) { bump(vel.y); vel.y = -vel.y * 0.54; vel.x *= 0.94; }
         }
       }
 
-      // 姿态：跟着吊绳的倾角，外加一点速度甩动
-      const below = pos.y > anchor.y + 6;
-      const ropeAngle = below ? clamp(Math.atan2(pos.x - anchor.x, pos.y - anchor.y), -0.5, 0.5) : 0;
-      const target = clamp(ropeAngle * 0.32 + clamp(vel.x * 0.00012, -0.05, 0.05), -MAX_ROT, MAX_ROT);
+      // 没有吊绳了，姿态只跟着横向速度轻轻侧倾
+      const target = clamp(vel.x * 0.00016, -MAX_ROT, MAX_ROT);
       rot += (target - rot) * Math.min(1, dt * 8);
       squash = Math.max(0, squash - dt * 3.6);
       lift += ((dragging ? 1 : 0) - lift) * Math.min(1, dt * 10);
@@ -174,126 +148,6 @@ const start = () => {
       ctx.closePath();
     }
 
-    function clipPoint(side) {
-      // 卡片上沿的两个挂点
-      const lx = side * cw * 0.32;
-      const ly = -ch * 0.5 - 2;
-      return {
-        x: pos.x + lx * Math.cos(rot) - ly * Math.sin(rot),
-        y: pos.y + lx * Math.sin(rot) + ly * Math.cos(rot),
-      };
-    }
-
-    function drawStraps() {
-      const restLen = Math.max(30, rest.y - ch * 0.5 - anchor.y);
-      [-1, 1].forEach((side) => {
-        const to = clipPoint(side);
-        const dx = to.x - anchor.x;
-        const dy = to.y - anchor.y;
-        const dist = Math.hypot(dx, dy) || 0.001;
-        const slack = clamp((restLen - dist) / restLen, 0, 1);
-        const cx = (anchor.x + to.x) / 2 + (-dy / dist) * slack * 10;
-        const cy = (anchor.y + to.y) / 2 + (dx / dist) * slack * 7 + slack * 12;
-
-        const grad = ctx.createLinearGradient(anchor.x, anchor.y, to.x, to.y);
-        grad.addColorStop(0, 'rgba(160,190,200,0.28)');
-        grad.addColorStop(1, 'rgba(200,235,228,0.62)');
-
-        ctx.beginPath();
-        ctx.moveTo(anchor.x, anchor.y);
-        ctx.quadraticCurveTo(cx, cy, to.x, to.y);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 2.4;
-        ctx.stroke();
-
-        // 挂点小环
-        ctx.beginPath();
-        ctx.arc(to.x, to.y, 3.2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(214,236,231,0.85)';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(to.x, to.y, 5.4, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(214,236,231,0.22)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      });
-
-      // 顶部固定点
-      ctx.beginPath();
-      ctx.arc(anchor.x, anchor.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(43,230,174,0.85)';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(anchor.x, anchor.y, 6.5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(43,230,174,0.22)';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-    }
-
-    function drawContent(w, h) {
-      const pad = 18;
-      const left = -w / 2 + pad;
-      const top = -h / 2 + pad;
-
-      // 品牌标记：三根律动柱
-      const bars = [9, 17, 12];
-      bars.forEach((bh, i) => {
-        ctx.fillStyle = i === 1 ? 'rgba(43,230,174,0.95)' : 'rgba(43,230,174,0.55)';
-        ctx.beginPath();
-        ctx.roundRect(left + i * 5.5, top + (17 - bh), 3, bh, 1.6);
-        ctx.fill();
-      });
-
-      // 标题
-      ctx.fillStyle = 'rgba(233,242,240,0.92)';
-      ctx.font = '600 13px "PingFang SC","Microsoft YaHei",sans-serif';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('智学节律', left + 24, top + 8);
-
-      // 右上角状态点
-      const dotX = w / 2 - pad - 4;
-      const dotY = top + 8;
-      const pulse = 0.55 + Math.sin(time * 2.2) * 0.25;
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 6, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(43,230,174,${0.12 * pulse})`;
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 2.4, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(43,230,174,${0.55 + pulse * 0.4})`;
-      ctx.fill();
-
-      // 底部：一条极细的进度发丝线
-      const lineY = h / 2 - pad - 10;
-      ctx.beginPath();
-      ctx.moveTo(left, lineY);
-      ctx.lineTo(w / 2 - pad, lineY);
-      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      const ratio = 0.62;
-      const grad = ctx.createLinearGradient(left, 0, left + (w - pad * 2) * ratio, 0);
-      grad.addColorStop(0, 'rgba(43,230,174,0.95)');
-      grad.addColorStop(1, 'rgba(72,200,255,0.75)');
-      ctx.beginPath();
-      ctx.moveTo(left, lineY);
-      ctx.lineTo(left + (w - pad * 2) * ratio, lineY);
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-
-      // 底部文字
-      ctx.fillStyle = 'rgba(147,166,176,0.85)';
-      ctx.font = '400 8.5px "SF Mono",Consolas,monospace';
-      ctx.fillText('RHYTHM OS · 2027', left, h / 2 - pad + 2);
-
-      ctx.fillStyle = 'rgba(43,230,174,0.85)';
-      ctx.textAlign = 'right';
-      ctx.fillText('62%', w / 2 - pad, h / 2 - pad + 2);
-      ctx.textAlign = 'left';
-    }
-
     function drawCard() {
       const w = cw;
       const h = ch;
@@ -301,14 +155,14 @@ const start = () => {
       const sy = 1 - squash * 0.14;
       const glow = 0.16 + lift * 0.12;
 
-      // 柔和落影：椭圆径向渐变，拎起时更淡更远
+      // 柔和落影
       ctx.save();
-      ctx.translate(pos.x, pos.y + h * 0.42 + 18 + lift * 12);
+      ctx.translate(pos.x, pos.y + h * 0.55 + 12 + lift * 12);
       ctx.rotate(rot * 0.6);
-      ctx.scale(1, 0.42);
+      ctx.scale(1, 0.4);
       const shadow = ctx.createRadialGradient(0, 0, w * 0.05, 0, 0, w * 0.72);
-      shadow.addColorStop(0, `rgba(0,0,0,${0.46 - lift * 0.16})`);
-      shadow.addColorStop(0.55, `rgba(0,0,0,${0.22 - lift * 0.1})`);
+      shadow.addColorStop(0, `rgba(0,0,0,${0.4 - lift * 0.14})`);
+      shadow.addColorStop(0.55, `rgba(0,0,0,${0.19 - lift * 0.08})`);
       shadow.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = shadow;
       ctx.beginPath();
@@ -321,7 +175,7 @@ const start = () => {
       ctx.rotate(rot);
       ctx.scale(sx, sy);
 
-      // 玻璃体（不垫深色底，保持真正半透明）
+      // 玻璃体
       const glass = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
       glass.addColorStop(0, `rgba(255,255,255,${0.2 + lift * 0.05})`);
       glass.addColorStop(0.38, 'rgba(255,255,255,0.095)');
@@ -343,7 +197,7 @@ const start = () => {
       ctx.fillStyle = mint;
       ctx.fillRect(-w / 2, -h / 2, w, h);
 
-      // 斜向高光
+      // 斜向反光
       const sheen = ctx.createLinearGradient(-w / 2, -h / 2, w * 0.55, h * 0.55);
       sheen.addColorStop(0, `rgba(255,255,255,${glow + 0.02})`);
       sheen.addColorStop(0.32, 'rgba(255,255,255,0.03)');
@@ -351,7 +205,7 @@ const start = () => {
       ctx.fillStyle = sheen;
       ctx.fillRect(-w / 2, -h / 2, w, h);
 
-      // 左上角的一小块镜面高光
+      // 左上角镜面高光
       const spec = ctx.createRadialGradient(-w * 0.34, -h * 0.36, 2, -w * 0.34, -h * 0.36, w * 0.46);
       spec.addColorStop(0, `rgba(255,255,255,${0.16 + lift * 0.06})`);
       spec.addColorStop(0.45, 'rgba(255,255,255,0.03)');
@@ -361,9 +215,9 @@ const start = () => {
 
       ctx.restore();
 
-      // 外描边（带一点薄荷辉光）+ 内描边
+      // 外描边（薄荷辉光）+ 内描边
       ctx.save();
-      ctx.shadowColor = `rgba(43,230,174,${0.28 + lift * 0.18})`;
+      ctx.shadowColor = `rgba(43,230,174,${0.26 + lift * 0.16})`;
       ctx.shadowBlur = 14;
       roundRect(-w / 2, -h / 2, w, h, RADIUS);
       ctx.strokeStyle = `rgba(226,255,246,${0.34 + lift * 0.1})`;
@@ -375,13 +229,19 @@ const start = () => {
       ctx.strokeStyle = 'rgba(255,255,255,0.08)';
       ctx.stroke();
 
-      drawContent(w, h);
+      // 卡面内容：只有「智学节律」
+      ctx.fillStyle = 'rgba(233,242,240,0.95)';
+      ctx.font = '600 15px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0.12em';
+      ctx.fillText('智学节律', 2, 1);
+      ctx.textAlign = 'left';
       ctx.restore();
     }
 
     function render() {
       ctx.clearRect(0, 0, W, H);
-      drawStraps();
       drawCard();
     }
 
@@ -431,7 +291,6 @@ const start = () => {
       dragging = true;
       pointer.x = p.x;
       pointer.y = p.y;
-      pointer.inside = true;
       grab = { x: pos.x - p.x, y: pos.y - p.y };
       host.setPointerCapture(event.pointerId);
       host.style.cursor = 'grabbing';
@@ -445,7 +304,6 @@ const start = () => {
       const p = localPoint(event);
       pointer.x = p.x;
       pointer.y = p.y;
-      pointer.inside = true;
       if (dragging) {
         if (reduceMotion) {
           const b = bounds();
@@ -473,7 +331,6 @@ const start = () => {
     host.addEventListener('pointerup', endDrag);
     host.addEventListener('pointercancel', endDrag);
     host.addEventListener('pointerleave', () => {
-      pointer.inside = false;
       if (!dragging) host.style.cursor = 'default';
     });
 
