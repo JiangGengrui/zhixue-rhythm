@@ -791,6 +791,7 @@
     })();
   </script>
 
-  <script src="/three-effects.js" defer></script>
+  <!-- 交给 Vite 打包并加内容哈希：避免静态文件被一年强缓存钉死 -->
+  <script type="module" src="/src/landing/three-effects.js"></script>
 </body>
 </html>
