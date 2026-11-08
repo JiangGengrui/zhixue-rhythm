@@ -3,7 +3,7 @@ import {
   newId, sessionCookie, clearCookie, verifyPassword, verifyRecoveryCode,
 } from './auth.mjs';
 import { nowISO } from './db.mjs';
-import { buildReport, packWeek } from './engine.generated.mjs';
+import { buildReport, decomposeGoal, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SUBJECTS = new Set(['math', 'major', 'english', 'politics', 'other']);
@@ -123,6 +123,11 @@ export function createApi(db) {
     moveBlock: db.prepare('UPDATE blocks SET date = ?, start_min = ?, end_min = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     deleteBlock: db.prepare('DELETE FROM blocks WHERE id = ? AND user_id = ?'),
     deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done'"),
+    clearItems: db.prepare('DELETE FROM items WHERE user_id = ?'),
+    clearBlocks: db.prepare('DELETE FROM blocks WHERE user_id = ?'),
+    setRemaining: db.prepare('UPDATE items SET remaining_min = ? WHERE id = ? AND user_id = ?'),
+    countReplan: db.prepare('SELECT COUNT(*) AS c FROM replan_log WHERE user_id = ? AND week_start = ?'),
+    insertReplan: db.prepare('INSERT INTO replan_log (user_id, week_start, option_key, created_at) VALUES (?, ?, ?, ?)'),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     itemById: db.prepare('SELECT * FROM items WHERE id = ? AND user_id = ?'),
     deleteItem: db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?'),
@@ -220,6 +225,141 @@ export function createApi(db) {
     },
 
     'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+
+    'GET /api/decompose/templates': () => ({ templates: TEMPLATE_LIST }),
+
+    // 拆解：默认只返回草案；apply=true 时写库（已有计划项需 replace=true 确认覆盖）
+    'POST /api/goal/decompose': ({ user, body }) => {
+      const goal = q.goalByUser.get(user.id);
+      if (!goal) throw new HttpError(409, 'E4003', '请先创建目标');
+      const template = body?.template ?? 'postgrad-cs';
+      const result = decomposeGoal({
+        template,
+        today: todayISO(),
+        deadline: goal.deadline,
+        // 注意：这里是数据库原始行（未 normalize），列名是 weekly_minutes
+        weeklyMinutes: goal.weekly_minutes,
+        level: goal.level,
+      });
+
+      if (!body?.apply) return { result, applied: 0 };
+
+      const existing = q.itemsByUser.all(user.id);
+      if (existing.length > 0 && body?.replace !== true) {
+        throw new HttpError(409, 'E4009', '已有计划项，覆盖前请确认（replace=true）');
+      }
+
+      db.exec('BEGIN');
+      try {
+        q.clearBlocks.run(user.id);
+        q.clearItems.run(user.id);
+        const now = nowISO();
+        for (const draft of result.items) {
+          q.insertItem.run(
+            newId('item'), user.id, goal.id, draft.title, draft.subject,
+            draft.estimateMin, draft.estimateMin, draft.weight, now,
+          );
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      return { result, applied: result.items.length };
+    },
+
+    // 重排：只给方案，不写库；写库走 /api/plan/replan/apply
+    'GET /api/plan/replan': ({ user, query }) => {
+      const weekStart = dateStr(query.get('week') ?? '', '周');
+      const state = stateOf(user);
+      const replanCount = q.countReplan.get(user.id, weekStart).c;
+      const plan = planReplan({
+        blocks: state.blocks,
+        items: state.items,
+        settings: state.settings,
+        weekStart,
+        today: todayISO(),
+        manual: query.has('manual'),
+        replanCount,
+      });
+      return {
+        weekStart,
+        replanCount,
+        trigger: plan.trigger,
+        blocked: plan.blocked,
+        calibration: plan.calibration ?? null,
+        options: plan.options.map((o) => ({
+          key: o.key,
+          label: o.label,
+          reason: o.reason,
+          cost: o.cost,
+          summary: o.summary,
+          plannedMin: o.plannedMin,
+          bufferMin: o.bufferMin,
+          loadIncreasePct: o.loadIncreasePct,
+          feasible: o.feasible,
+        })),
+      };
+    },
+
+    'POST /api/plan/replan/apply': ({ user, body }) => {
+      const weekStart = dateStr(body?.week, '周');
+      const key = String(body?.option ?? '');
+      const weekEnd = addDays(weekStart, 6);
+      const state = stateOf(user);
+      const replanCount = q.countReplan.get(user.id, weekStart).c;
+
+      const plan = planReplan({
+        blocks: state.blocks,
+        items: state.items,
+        settings: state.settings,
+        weekStart,
+        today: todayISO(),
+        manual: true,
+        replanCount,
+      });
+
+      if (plan.blocked) {
+        throw new HttpError(409, 'E1035', plan.calibration ?? '连续多次重排仍未达标，建议调整目标');
+      }
+      const option = plan.options.find((o) => o.key === key);
+      if (!option) throw bad('E1033', '未知的重排方案');
+      if (!option.feasible && (option.key === 'defer' || option.key === 'compress')) {
+        throw new HttpError(409, 'E1034', '这个方案仍然装不下，建议改用「替代」或「放弃」，或延长目标日期');
+      }
+
+      db.exec('BEGIN');
+      try {
+        q.deletePendingWeek.run(user.id, weekStart, weekEnd);
+        for (const block of option.blocks) {
+          q.insertBlock.run(
+            block.id, user.id, block.itemId, block.date, block.startMin, block.endMin,
+            block.isBuffer ? 1 : 0, 'pending', null, null, nowISO(),
+          );
+        }
+        for (const change of option.itemChanges) {
+          if (change.remove) {
+            q.deleteBlocksOfItem.run(change.id, user.id);
+            q.deleteItem.run(change.id, user.id);
+          } else if (typeof change.remainingMin === 'number') {
+            q.setRemaining.run(change.remainingMin, change.id, user.id);
+          }
+        }
+        q.insertReplan.run(user.id, weekStart, option.key, nowISO());
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+
+      const after = stateOf(user);
+      return {
+        applied: option.key,
+        summary: option.summary,
+        replanCount: replanCount + 1,
+        blocks: after.blocks.filter((b) => b.date >= weekStart && b.date <= weekEnd),
+      };
+    },
 
     // 产品主页的公开接口：无需登录
     'GET /api/feedback': ({ query }) => {

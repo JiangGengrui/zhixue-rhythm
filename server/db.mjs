@@ -91,6 +91,15 @@ function migrate(db) {
       key TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0
     );
+
+    -- 重排日志：同周计数用于 PRD 8.4 的「连续 3 次仍未达标则停止重排」
+    CREATE TABLE IF NOT EXISTS replan_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      week_start TEXT NOT NULL,
+      option_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // 增量迁移：任务剩余工时（老库补列，默认取预估工时）

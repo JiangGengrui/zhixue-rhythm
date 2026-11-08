@@ -1,7 +1,7 @@
 {
   "name": "zhixue-app",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,7 @@
     "test:unit": "vitest run",
     "test:api": "npm run build:engine && node --test server/api.test.mjs",
     "test:e2e": "npm run build:engine && node scripts/e2e.mjs",
-    "build:engine": "esbuild src/domain/engine.ts --bundle --format=esm --platform=neutral --outfile=server/engine.generated.mjs --log-level=warning",
+    "build:engine": "esbuild src/domain/index.ts --bundle --format=esm --platform=neutral --outfile=server/engine.generated.mjs --log-level=warning",
     "backup": "node scripts/backup.mjs"
   },
   "dependencies": {

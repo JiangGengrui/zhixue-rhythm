@@ -2,7 +2,7 @@
 
 真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
-**当前版本：v1.0.2** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
+**当前版本：v1.1.0** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
 
 ## 版本历史
 
@@ -18,6 +18,8 @@
 | v1.0.0 | 线上发布与验收 | 全链路线上验收、发布流程固化 |
 | v1.0.1 | 主页入口修复 | 主页回到根路径、预览块死按钮、周日空计划提示 |
 | v1.0.2 | 交互缺陷修复 | 顶栏「设置目标」、生成/重排反馈、跨周预览、当日合计 |
+| v1.1.0 | 拆解与重排引擎 | 知识域树模板、三段式拆解与智能裁断、四级重排方案与三条硬约束 |
+| v1.1.0 | 界面改版与双主题 | 左侧导航 + 8/4 栅格、深空/冷光双主题、环形仪表、页面级动效、落地页同步 |
 
 ## 页面结构
 
@@ -65,10 +67,10 @@ npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS token，无 UI 框架 |
+| 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS 令牌（深/浅两套），无 UI 框架 |
 | 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库；登出/改密/重置密码都会失效；注册下发一次性恢复码用于找回 |
-| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 42 条自动化用例 + 21 步浏览器验收 |
+| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 64 条自动化用例 + 21 步浏览器验收 |
 | 离线 | 本地操作队列（localStorage）+ `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
 | 同构 | esbuild 把 `src/domain/engine.ts` 打成 `server/engine.generated.mjs` | 排程与周报前后端共用**同一份源码**，不存在两套算法 |
 
@@ -83,7 +85,10 @@ server/
 ├── engine.generated.mjs  由 src/domain/engine.ts 打包而来（构建产物，勿手改）
 └── api.test.mjs   19 条接口测试（越权/幂等/非法迁移/导出/注销/恢复码）
 src/
-├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因）+ 20 条单测
+├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因 / 拆解 / 重排）+ 40 条单测
+│   ├── templates.ts   知识域树模板（3 类目标）
+│   ├── decompose.ts   三段式拆解：模板骨架 → 参数填充 → 智能裁断
+│   └── replan.ts      重排：触发检测 + 四级方案 + 三条硬约束
 ├── data/api.ts    唯一 HTTP 客户端
 ├── data/offlineQueue.ts  离线操作队列（断网暂存 + opId 幂等补传）
 ├── store.ts       会话 + 服务端状态（前端唯一数据出口，含乐观更新）
@@ -96,6 +101,7 @@ index.html        产品主页（营销页，多页构建入口之一）
 app.html          学习空间（React 应用）
 docs/openapi.yaml  API 契约
 docs/操作手册.md    启动、备份、回滚、排障
+docs/拆解与重排接入说明.md  给前端/UI 的接口与呈现约定
 CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
 ```
 
@@ -118,6 +124,10 @@ CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
 | DELETE | `/api/blocks/:id` | 删除单个任务块，任务回到待排池 |
 | POST | `/api/auth/password` | 修改密码：校验旧密码，旧会话全部失效并下发新会话 |
 | GET | `/api/export?format=json\|csv` | 导出全部数据（JSON）或任务记录（CSV，带 BOM） |
+| GET | `/api/decompose/templates` | 拆解模板清单（考研 / 考公 / 项目导学） |
+| POST | `/api/goal/decompose` | 拆解目标为计划项草案；`apply=true` 才写库（需 `replace=true` 确认覆盖） |
+| GET | `/api/plan/replan?week=` | 重排方案预览（顺延/压缩/替代/放弃），不写库 |
+| POST | `/api/plan/replan/apply` | 应用选定方案，重写本周未完成块并记录重排次数 |
 | DELETE | `/api/account` | 注销账号：校验密码、级联删除数据、会话失效 |
 
 错误统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。
@@ -126,7 +136,7 @@ CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 42 条通过（引擎 20 + 接口 22） |
+| `npm test` | 64 条通过（引擎 40 + 接口 24） |
 | `npx tsc --noEmit` | 0 错误 |
 | `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
 | `node scripts/e2e.mjs` | 17 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → **断网打卡 → 恢复补传** → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 忘记密码入口 → 控制台零报错 |

@@ -217,3 +217,58 @@ paths:
       responses:
         '200': { description: 成功 }
         '400': { description: 密码不正确 }
+  /api/decompose/templates:
+    get:
+      summary: 拆解模板清单（3 类：考研 / 考公 / 项目导学）
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200':
+          description: '{ templates: [{ key, label, nodeCount, totalMinutes }] }'
+  /api/goal/decompose:
+    post:
+      summary: 拆解目标为计划项草案（默认只预览；apply=true 才写库）
+      description: |
+        三段式：模板骨架 → 参数填充 → 智能裁断。
+        R > 1 时按「低频低分 → 已有基础 → 可合并」顺序裁剪，被放弃项在 trimmed 里显式返回。
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                template: { type: string, enum: [postgrad-cs, civil-service, project-self], default: postgrad-cs }
+                apply: { type: boolean, default: false, description: 为 true 时把草案写入计划项（先清空原有计划项与任务块） }
+                replace: { type: boolean, default: false, description: 已有计划项时必须显式传 true，否则返回 409 / E4009 }
+      responses:
+        '200':
+          description: '{ result: { stages, items, demandMin, availableMin, ratio, verdict, trimmed, warnings }, applied }'
+        '409': { description: 未确认覆盖（E4009）或未建目标（E4003） }
+  /api/plan/replan:
+    get:
+      summary: 重排方案预览（顺延 / 压缩 / 替代 / 放弃），不写库
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: week, in: query, required: true, schema: { type: string } }
+        - { name: manual, in: query, required: false, schema: { type: boolean }, description: 用户主动发起时传 true }
+      responses:
+        '200':
+          description: '{ trigger, options[], blocked, calibration, replanCount }；每个方案含 summary / loadIncreasePct / feasible'
+  /api/plan/replan/apply:
+    post:
+      summary: 应用选定的重排方案（重写本周未完成块，必要时修改或移除计划项）
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [week, option]
+              properties:
+                week: { type: string, example: '2026-11-09' }
+                option: { type: string, enum: [defer, compress, substitute, drop] }
+      responses:
+        '200':
+          description: '{ applied, summary: { added, deferred, dropped, deferredMin }, replanCount, blocks }'
+        '409': { description: 已达重排上限（E1035）或该方案仍装不下（E1034） }
+        '400': { description: 未知方案（E1033） }

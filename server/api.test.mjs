@@ -513,6 +513,71 @@ test('重排这一周：清掉未完成块重新装，已完成记录与新增�
   }
 });
 
+test('拆解：模板列表 + 预览草案（含阶段与裁断）', async () => {
+  const { cookie } = await register('decompose@test.dev');
+  await call('PUT', '/api/goal', { title: '考研', deadline: '2027-05-01', weeklyMinutes: 900, level: 'once' }, cookie);
+
+  const tpl = await call('GET', '/api/decompose/templates', null, cookie);
+  assert.equal(tpl.status, 200);
+  assert.equal(tpl.json.templates.length, 3);
+
+  const preview = await call('POST', '/api/goal/decompose', { template: 'postgrad-cs' }, cookie);
+  assert.equal(preview.status, 200, JSON.stringify(preview.json));
+  assert.equal(preview.json.applied, 0);
+  const r = preview.json.result;
+  assert.ok(r.items.length > 0, '应产出计划项');
+  assert.equal(r.stages.length, 3);
+  assert.equal(r.stageRatio.length, 3);
+  assert.ok(['comfortable', 'reasonable', 'tight', 'infeasible'].includes(r.verdict));
+  assert.ok(r.items.every((i) => i.estimateMin > 0 && i.weight >= 1 && i.weight <= 5));
+
+  // 未确认覆盖时拒绝写库
+  await call('POST', '/api/items', { title: '手工任务', subject: 'math', estimateMin: 60, weight: 3 }, cookie);
+  const reject = await call('POST', '/api/goal/decompose', { template: 'postgrad-cs', apply: true }, cookie);
+  assert.equal(reject.status, 409);
+  assert.equal(reject.json.error.code, 'E4009');
+
+  const applied = await call('POST', '/api/goal/decompose', { template: 'postgrad-cs', apply: true, replace: true }, cookie);
+  assert.equal(applied.status, 200);
+  assert.ok(applied.json.applied > 0);
+
+  const state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.items.length, applied.json.applied);
+  assert.ok(!state.json.items.some((i) => i.title === '手工任务'), '覆盖后旧计划项应被清掉');
+  assert.equal(state.json.blocks.length, 0);
+});
+
+test('重排：四个方案 + 应用顺延 + 未知方案被拒', async () => {
+  const { cookie } = await register('replan@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2027-05-01', weeklyMinutes: 300, level: 'once' }, cookie);
+  for (const title of ['A', 'B', 'C']) {
+    await call('POST', '/api/items', { title, subject: 'math', estimateMin: 300, weight: 4 }, cookie);
+  }
+  const week = '2026-11-09';
+
+  const plan = await call('GET', `/api/plan/replan?week=${week}`, null, cookie);
+  assert.equal(plan.status, 200, JSON.stringify(plan.json));
+  assert.deepEqual(plan.json.options.map((o) => o.key), ['defer', 'compress', 'substitute', 'drop']);
+  for (const o of plan.json.options) {
+    assert.ok(typeof o.summary.added === 'number');
+    assert.ok(typeof o.loadIncreasePct === 'number');
+  }
+  assert.equal(plan.json.replanCount, 0);
+
+  const bad = await call('POST', '/api/plan/replan/apply', { week, option: 'nope' }, cookie);
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.error.code, 'E1033');
+
+  const applied = await call('POST', '/api/plan/replan/apply', { week, option: 'defer' }, cookie);
+  assert.equal(applied.status, 200, JSON.stringify(applied.json));
+  assert.equal(applied.json.applied, 'defer');
+  assert.ok(applied.json.blocks.length > 0, '顺延后应写入本周任务块');
+  assert.equal(applied.json.replanCount, 1);
+
+  const again = await call('GET', `/api/plan/replan?week=${week}`, null, cookie);
+  assert.equal(again.json.replanCount, 1, '重排次数应被记录');
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

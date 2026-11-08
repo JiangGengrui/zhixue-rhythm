@@ -113,3 +113,142 @@ export interface Report {
   suggestion: string;
   hasData: boolean;
 }
+
+/* ───────── 拆解引擎（PRD 8.2） ───────── */
+
+export type GoalTemplate = 'postgrad-cs' | 'civil-service' | 'project-self';
+export type StageKey = 'foundation' | 'strengthen' | 'sprint';
+
+export const STAGE_LABEL: Record<StageKey, string> = {
+  foundation: '基础',
+  strengthen: '强化',
+  sprint: '冲刺',
+};
+
+/** 知识域树的章节节点：标准工时 + 考频权重 + 分值占比 + 推荐阶段 */
+export interface KnowledgeNode {
+  id: string;
+  title: string;
+  subject: Subject;
+  module: string;
+  /** 标准工时（分钟），已按“一刷”基准标定 */
+  minutes: number;
+  /** 考频权重 0–1 */
+  frequency: number;
+  /** 分值占比 0–1 */
+  share: number;
+  stage: StageKey;
+  /** 可与其他节点合并（裁断第三顺位） */
+  mergeable?: boolean;
+}
+
+export interface DecomposeTemplate {
+  key: GoalTemplate;
+  label: string;
+  /** 基础 / 强化 / 冲刺 的时间占比 */
+  stageRatio: [number, number, number];
+  nodes: KnowledgeNode[];
+}
+
+/** 拆解产出的计划项草案 */
+export interface DraftItem {
+  key: string;
+  title: string;
+  subject: Subject;
+  module: string;
+  estimateMin: number;
+  weight: number;
+  stage: StageKey;
+  nodeIds: string[];
+}
+
+export interface DecomposeStage {
+  key: StageKey;
+  label: string;
+  startDate: string;
+  endDate: string;
+  minutes: number;
+  milestone: string;
+}
+
+export interface TrimmedNode {
+  id: string;
+  title: string;
+  minutes: number;
+  reason: 'low-priority' | 'mastered' | 'merged';
+  note: string;
+}
+
+export interface DecomposeResult {
+  template: GoalTemplate;
+  stages: DecomposeStage[];
+  items: DraftItem[];
+  /** 裁剪后的需求工时 */
+  demandMin: number;
+  availableMin: number;
+  ratio: number;
+  verdict: Verdict;
+  weeksLeft: number;
+  stageRatio: [number, number, number];
+  trimmed: TrimmedNode[];
+  warnings: string[];
+}
+
+/* ───────── 重排引擎（PRD 8.4） ───────── */
+
+export type ReplanReasonCode = 'low-achievement' | 'backlog' | 'manual' | 'goal-changed' | 'long-break';
+
+export interface ReplanTrigger {
+  triggered: boolean;
+  rescue: boolean;
+  backlogMin: number;
+  reasons: Array<{ code: ReplanReasonCode; label: string; detail: string }>;
+}
+
+export type ReplanOptionKey = 'defer' | 'compress' | 'substitute' | 'drop';
+
+export interface ReplanSummary {
+  /** 新增（重新排入）的块数 */
+  added: number;
+  /** 延期到下周的项数 */
+  deferred: number;
+  /** 显式放弃的项数 */
+  dropped: number;
+  /** 延期工作量（分钟） */
+  deferredMin: number;
+}
+
+export interface ReplanItemChange {
+  id: string;
+  /** 覆盖工时（压缩时用） */
+  remainingMin?: number;
+  /** 放弃该计划项 */
+  remove?: boolean;
+}
+
+export interface ReplanOption {
+  key: ReplanOptionKey;
+  label: string;
+  /** 一句话理由 */
+  reason: string;
+  /** 代价说明 */
+  cost: string;
+  summary: ReplanSummary;
+  plannedMin: number;
+  bufferMin: number;
+  /** 未来 7 天负载相对当前增幅（%），硬约束 ≤ 20 */
+  loadIncreasePct: number;
+  feasible: boolean;
+  /** 该方案下本周的块（可直接落库） */
+  blocks: Block[];
+  itemChanges: ReplanItemChange[];
+}
+
+export interface ReplanResult {
+  trigger: ReplanTrigger;
+  options: ReplanOption[];
+  /** 连续重排仍不达标时置真，停止继续重排 */
+  blocked: boolean;
+  /** 目标校准建议（blocked 时给出） */
+  calibration?: string;
+}
