@@ -193,6 +193,8 @@ export function deviationStats(blocks: Block[]): DeviationStats {
   const ratios: number[] = [];
   for (const b of blocks) {
     if (b.status !== 'done' || b.actualMin == null) continue;
+    // 补录没有真实计时，自报用时无法反映估时准确性，不参与偏差统计
+    if (b.source === 'backfill') continue;
     const planned = b.endMin - b.startMin;
     if (planned <= 0) continue;
     ratios.push((b.actualMin - planned) / planned);
@@ -236,6 +238,7 @@ export function buildReport(blocks: Block[], settings: Settings, weekStartISO: s
 
   const hasData = blocks.length > 0;
   const achievement = planned.length > 0 ? done.length / planned.length : 0;
+  const backfillCount = done.filter((b) => b.source === 'backfill').length;
   const dev = deviationStats(blocks);
 
   const overloadMin = Math.max(0, plannedMin - capacity);
@@ -249,7 +252,7 @@ export function buildReport(blocks: Block[], settings: Settings, weekStartISO: s
   const estimateRaw =
     plannedMin > 0 && dev.count > 0
       ? blocks
-          .filter((b) => b.status === 'done' && b.actualMin != null)
+          .filter((b) => b.status === 'done' && b.actualMin != null && b.source !== 'backfill')
           .reduce((s, b) => {
             const plannedOne = b.endMin - b.startMin;
             return s + Math.abs(b.actualMin! - plannedOne);
@@ -291,6 +294,7 @@ export function buildReport(blocks: Block[], settings: Settings, weekStartISO: s
     plannedMin,
     effectiveMin,
     deviation: dev,
+    backfillCount,
     causes,
     suggestion,
     hasData,

@@ -62,9 +62,17 @@ export interface Block {
   endMin: number;
   isBuffer: boolean;
   status: BlockStatus;
-  /** 实际用时（分钟），完成时填写 */
+  /** 实际用时（分钟），完成时填写；未填写时由计时器推导 */
   actualMin?: number;
   skipReason?: SkipReason;
+  /** 执行来源：plan=按计划打卡，backfill=补录（不参与估时偏差统计） */
+  source?: 'plan' | 'backfill';
+  /** 完成度百分比（1–100）。低于 100 时，剩余工作量自动滚入下次排程 */
+  progressPct?: number;
+  /** 已累计执行秒数（暂停时间不计） */
+  accumulatedSec?: number;
+  /** 当前一段执行的开始时间（ISO）。status=running 且该字段为空表示处于暂停 */
+  startedAt?: string;
 }
 
 export interface Settings {
@@ -109,6 +117,8 @@ export interface Report {
   plannedMin: number;
   effectiveMin: number;
   deviation: DeviationStats;
+  /** 本周补录完成数：计入达成与时长，但不参与估时偏差 */
+  backfillCount: number;
   causes: Array<{ key: 'capacity' | 'interrupt' | 'estimate'; label: string; share: number }>;
   suggestion: string;
   hasData: boolean;

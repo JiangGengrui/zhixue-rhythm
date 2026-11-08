@@ -252,6 +252,81 @@ test('设置接口：校验每日时长并影响周容量', async () => {
   assert.equal(gen.json.capacityMin, 300);
 });
 
+test('执行计时：开始、暂停、继续与计时推导用时', async () => {
+  const { cookie } = await register('timer@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 60, weight: 5 }, cookie);
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const block = gen.json.blocks[0];
+
+  const started = await call('PATCH', `/api/blocks/${block.id}`, { status: 'running' }, cookie);
+  assert.equal(started.json.block.status, 'running');
+  assert.ok(started.json.block.startedAt, '开始执行应记录 startedAt');
+
+  const paused = await call('PATCH', `/api/blocks/${block.id}`, { action: 'pause' }, cookie);
+  assert.equal(paused.json.block.startedAt, undefined, '暂停后不应在计时');
+  assert.ok(paused.json.block.accumulatedSec >= 0);
+
+  const resumed = await call('PATCH', `/api/blocks/${block.id}`, { action: 'resume' }, cookie);
+  assert.ok(resumed.json.block.startedAt, '继续后应重新计时');
+
+  // 未填 actualMin：由计时推导（刚继续，约 0-1 分钟，钳制为 ≥1）
+  const done = await call('PATCH', `/api/blocks/${block.id}`, { status: 'done' }, cookie);
+  assert.equal(done.json.block.status, 'done');
+  assert.ok(done.json.block.actualMin >= 1);
+  assert.equal(done.json.block.progressPct, 100);
+
+  // 非运行状态不允许暂停
+  const bad = await call('PATCH', `/api/blocks/${block.id}`, { action: 'pause' }, cookie);
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.error.code, 'E1037');
+});
+
+test('补录标识与周报口径：计入达成与时长，不进偏差', async () => {
+  const { cookie } = await register('mark@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  for (const t of ['A', 'B']) {
+    await call('POST', '/api/items', { title: t, subject: 'math', estimateMin: 60, weight: 4 }, cookie);
+  }
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const [first, second] = gen.json.blocks;
+
+  // 计时完成：超时 50%
+  await call('PATCH', `/api/blocks/${first.id}`, { status: 'done', actualMin: 90 }, cookie);
+  // 补录：自报 600 分钟
+  await call('PATCH', `/api/blocks/${second.id}`, { status: 'done', actualMin: 600, source: 'backfill' }, cookie);
+
+  const state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.blocks.find((b) => b.id === second.id).source, 'backfill');
+  assert.equal(state.json.blocks.find((b) => b.id === first.id).source, 'plan');
+
+  const rep = await call('GET', '/api/report?week=2026-11-02', null, cookie);
+  assert.equal(rep.json.doneCount, 2);
+  assert.equal(rep.json.backfillCount, 1);
+  assert.equal(rep.json.effectiveMin, 690);
+  assert.equal(rep.json.deviation.count, 1, '偏差只统计计时记录');
+});
+
+test('撤销完成：剩余工时按完成度退还', async () => {
+  const { cookie } = await register('refund@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  const item = await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 120, weight: 5 }, cookie);
+  const itemId = item.json.item.id;
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  const block = gen.json.blocks[0];
+
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 60, progressPct: 50 }, cookie);
+  let state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.items.find((i) => i.id === itemId).remainingMin, 60);
+
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'pending' }, cookie);
+  state = await call('GET', '/api/state', null, cookie);
+  assert.equal(state.json.items.find((i) => i.id === itemId).remainingMin, 120, '撤销后工作量应退还');
+  const reverted = state.json.blocks.find((b) => b.id === block.id);
+  assert.equal(reverted.status, 'pending');
+  assert.equal(reverted.progressPct, undefined);
+});
+
 test('导出：JSON 完整快照与 CSV 任务记录', async () => {
   const { cookie } = await register('export@test.dev');
   await call('PUT', '/api/goal', { title: '导出目标', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
@@ -286,7 +361,8 @@ test('部分完成：按实际投入扣减剩余工时，下次排程只排剩�
   const block = gen1.json.blocks[0];
   assert.equal(block.endMin - block.startMin, 120);
 
-  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 60 }, cookie);
+  // 完成度 50%：投入 60 分钟，但工作量只消耗计划量的一半
+  await call('PATCH', `/api/blocks/${block.id}`, { status: 'done', actualMin: 60, progressPct: 50 }, cookie);
   let state = await call('GET', '/api/state', null, cookie);
   assert.equal(state.json.items.find((i) => i.id === itemId).remainingMin, 60);
 

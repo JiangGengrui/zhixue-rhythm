@@ -140,7 +140,14 @@ export const api = {
     request<{ ok: true }>('POST', '/api/auth/password', { currentPassword, newPassword }),
   patchBlock: (
     id: string,
-    patch: { status: Block['status']; actualMin?: number; skipReason?: Block['skipReason'] },
+    patch: {
+      status?: Block['status'];
+      actualMin?: number;
+      skipReason?: Block['skipReason'];
+      progressPct?: number;
+      source?: 'plan' | 'backfill';
+      action?: 'pause' | 'resume';
+    },
     opId?: string,
   ) =>
     request<{ block: Block; idempotent?: boolean }>('PATCH', `/api/blocks/${id}`, {

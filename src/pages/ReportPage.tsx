@@ -120,7 +120,11 @@ export function ReportPage({ state }: { state: AppState }) {
                     <Stat
                       label="估时偏差（中位）"
                       value={report.deviation.count > 0 ? signed(report.deviation.median) : '—'}
-                      note={`基于 ${report.deviation.count} 条记录`}
+                      note={
+                        report.backfillCount > 0
+                          ? `基于 ${report.deviation.count} 条计时记录（已排除 ${report.backfillCount} 条补录）`
+                          : `基于 ${report.deviation.count} 条计时记录`
+                      }
                       tone={report.deviation.median > 0 ? 'warn' : 'up'}
                     />
                     <Stat

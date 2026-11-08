@@ -1315,3 +1315,20 @@ input[type='time'] { font-family: var(--mono); font-size: 12.5px; }
 .opt-card .meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--ink-2); }
 .opt-card .small { font-size: 11.5px; color: var(--ink-3); }
 .opt-card.is-off { opacity: 0.55; }
+
+/* ── 执行计时与完成度 ── */
+.progress-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.progress-field input[type='range'] {
+  width: 180px;
+  accent-color: var(--mint);
+}
+.form-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-3);
+}

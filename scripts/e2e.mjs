@@ -150,26 +150,45 @@ async function main() {
   const base = `${origin}/app.html`;
 
   /** 完成今日一项任务：旧 UI 是「开始→完成→填时长」，新 UI 待完成项直接「补录」 */
+  /** 填写完成表单（用时 + 完成度默认 100）并确认 */
+  const fillDoneForm = async (minutes) => {
+    await cdp.eval(`
+      const input = document.querySelector('.inline-form input[type="number"]');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, '${minutes}');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    `);
+    await cdp.click('确认完成');
+    await sleep(900);
+  };
+
+  /** 完成一项任务：计时流程（开始 → 暂停 → 继续 → 完成）或补录表单 */
   const completeOneTask = async (minutes = 100) => {
     const labels = await cdp.eval(`
       return [...document.querySelectorAll('button')].map((b) => b.textContent.trim());
     `);
     if (labels.includes('开始')) {
       await cdp.click('开始');
+      await sleep(400);
+      // 计时交互：暂停 → 已暂停 → 继续 → 执行中
+      await cdp.click('暂停');
+      await sleep(500);
+      let body = await cdp.text();
+      assert(body.includes('已暂停'), '暂停后未显示已暂停状态');
+      await cdp.click('继续');
+      await sleep(500);
+      body = await cdp.text();
+      assert(body.includes('执行中'), '继续后未恢复计时');
+      console.log('✓ 计时暂停/继续正常');
       await cdp.click('完成');
-      await cdp.eval(`
-        const input = document.querySelector('.inline-form input');
-        if (!input) return false;
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        setter.call(input, '${minutes}');
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      `);
-      await cdp.click('确认完成');
+      await fillDoneForm(minutes);
     } else {
       await cdp.click('补录');
+      await sleep(400);
+      await fillDoneForm(minutes);
     }
-    await sleep(900);
   };
 
   // 0. 根路径必须是产品主页，且「进入」指向学习空间
@@ -347,6 +366,7 @@ async function main() {
   await completeOneTask(30);
   body = await cdp.text();
   assert(body.includes('待同步'), '离线操作未进入队列');
+  if (body.includes('补录')) console.log('  · 补录标识已显示');
   await cdp.shot('06b-offline');
   console.log('✓ 离线打卡已暂存');
 

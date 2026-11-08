@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from './data/api';
 import { enqueue, isOfflineError, loadOps, removeOp } from './data/offlineQueue';
+import type { StatusPatch } from './data/offlineQueue';
 import type { DecomposeResponse, ReplanOptionView, ReplanResponse, SessionUser } from './data/api';
 import { addDays, todayISO, weekDates } from './domain/date';
 import type { Block, BlockStatus, Goal, GoalTemplate, PlanItem, Settings } from './domain/types';
@@ -45,10 +46,13 @@ export interface Actions {
     status: BlockStatus,
     actualMin?: number,
     skipReason?: Block['skipReason'],
+    extra?: { progressPct?: number; source?: 'plan' | 'backfill' },
   ) => Promise<void>;
   seedDemo: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
   flushOps: () => Promise<void>;
+  pauseBlock: (id: string) => Promise<void>;
+  resumeBlock: (id: string) => Promise<void>;
   moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
@@ -198,8 +202,15 @@ export function useAppState() {
   }, [run]);
 
   const setBlockStatus = useCallback(
-    async (id: string, status: BlockStatus, actualMin?: number, skipReason?: Block['skipReason']) => {
+    async (
+      id: string,
+      status: BlockStatus,
+      actualMin?: number,
+      skipReason?: Block['skipReason'],
+      extra?: { progressPct?: number; source?: 'plan' | 'backfill' },
+    ) => {
       const before = state.blocks.find((b) => b.id === id);
+      const patch: StatusPatch = { status, actualMin, skipReason, ...extra };
       // 先乐观更新，离线时界面也能立即反映
       setState((prev) => ({
         ...prev,
@@ -210,21 +221,85 @@ export function useAppState() {
                 status,
                 actualMin: status === 'done' ? actualMin ?? b.endMin - b.startMin : b.actualMin,
                 skipReason: status === 'skipped' ? skipReason ?? 'other' : undefined,
+                progressPct: status === 'done' ? extra?.progressPct ?? b.progressPct ?? 100 : b.progressPct,
+                source: extra?.source ?? b.source,
               }
             : b,
         ),
       }));
 
       try {
-        const res = await api.patchBlock(id, { status, actualMin, skipReason });
+        const res = await api.patchBlock(id, patch);
         setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
         setError(null);
       } catch (err) {
         if (isOfflineError(err)) {
           setPendingOps(
-            enqueue({ id: crypto.randomUUID(), kind: 'status', blockId: id, payload: { status, actualMin, skipReason } }).length,
+            enqueue({ id: crypto.randomUUID(), kind: 'status', blockId: id, payload: patch }).length,
           );
           setError('当前处于离线状态，打卡已暂存，联网后会自动同步');
+          return;
+        }
+        if (err instanceof ApiError && err.status === 401) {
+          setPhase('guest');
+          return;
+        }
+        setError(messageOf(err));
+        if (before) {
+          setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? before : b)) }));
+        }
+      }
+    },
+    [state.blocks],
+  );
+
+  const pauseBlock = useCallback(
+    async (id: string) => {
+      const before = state.blocks.find((b) => b.id === id);
+      setState((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) =>
+          b.id === id ? { ...b, startedAt: undefined, accumulatedSec: b.accumulatedSec ?? 0 } : b,
+        ),
+      }));
+      try {
+        const res = await api.patchBlock(id, { action: 'pause' });
+        setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+        setError(null);
+      } catch (err) {
+        if (isOfflineError(err)) {
+          setPendingOps(enqueue({ id: crypto.randomUUID(), kind: 'status', blockId: id, payload: { action: 'pause' } }).length);
+          setError('当前处于离线状态，暂停已暂存，联网后会自动同步');
+          return;
+        }
+        if (err instanceof ApiError && err.status === 401) {
+          setPhase('guest');
+          return;
+        }
+        setError(messageOf(err));
+        if (before) {
+          setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? before : b)) }));
+        }
+      }
+    },
+    [state.blocks],
+  );
+
+  const resumeBlock = useCallback(
+    async (id: string) => {
+      const before = state.blocks.find((b) => b.id === id);
+      setState((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) => (b.id === id ? { ...b, startedAt: new Date().toISOString() } : b)),
+      }));
+      try {
+        const res = await api.patchBlock(id, { action: 'resume' });
+        setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+        setError(null);
+      } catch (err) {
+        if (isOfflineError(err)) {
+          setPendingOps(enqueue({ id: crypto.randomUUID(), kind: 'status', blockId: id, payload: { action: 'resume' } }).length);
+          setError('当前处于离线状态，继续执行已暂存，联网后会自动同步');
           return;
         }
         if (err instanceof ApiError && err.status === 401) {
@@ -401,7 +476,7 @@ export function useAppState() {
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
-      moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan,
+      pauseBlock, resumeBlock, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan,
     } satisfies Actions,
   };
 }

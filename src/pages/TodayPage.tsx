@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, IconCheck, Meter, Panel, Ring, Stat } from '../components';
 import { addDays, daysBetween, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import { SUBJECT_LABEL } from '../domain/types';
@@ -6,6 +6,15 @@ import type { Block } from '../domain/types';
 import type { AppState, Actions } from '../store';
 
 const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/** 秒数 → mm:ss（超 1 小时 h:mm:ss） */
+function fmtClock(totalSec: number) {
+  const sec = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -26,15 +35,33 @@ export function TodayPage({
 }) {
   const today = todayISO();
   const [editing, setEditing] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<'plan' | 'backfill'>('plan');
   const [minutes, setMinutes] = useState(0);
+  const [progressPct, setProgressPct] = useState(100);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  /** 当前已执行秒数：累计段 + 正在进行的段（暂停时 startedAt 为空） */
+  function elapsedSecOf(b: Block) {
+    const base = b.accumulatedSec ?? 0;
+    if (!b.startedAt) return base;
+    const started = Date.parse(b.startedAt);
+    return base + (Number.isFinite(started) ? Math.max(0, (nowTick - started) / 1000) : 0);
+  }
 
   const itemMap = useMemo(() => new Map(state.items.map((i) => [i.id, i])), [state.items]);
   const blocks = useMemo(
     () => state.blocks.filter((b) => b.date === today).sort((a, b) => a.startMin - b.startMin),
     [state.blocks, today],
   );
+
+  const hasRunning = blocks.some((b) => b.status === 'running');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning]);
 
   // 本周其他日期仍未完成的任务：允许补打卡，避免"今天没排到"就无事可做
   const weekStart = startOfWeek(today, state.settings.weekStart);
@@ -81,9 +108,63 @@ export function TodayPage({
   const effectiveMin = done.reduce((s, b) => s + (b.actualMin ?? b.endMin - b.startMin), 0);
   const leftDays = state.goal ? daysBetween(today, state.goal.deadline) : null;
 
-  function startComplete(b: Block) {
+  function startComplete(b: Block, source: 'plan' | 'backfill' = 'plan') {
     setEditing(b.id);
-    setMinutes(b.endMin - b.startMin);
+    setEditingSource(source);
+    setProgressPct(100);
+    // 执行中的任务用计时器预填，避免用户凭感觉报数
+    setMinutes(b.status === 'running' ? Math.max(1, Math.round(elapsedSecOf(b) / 60)) : b.endMin - b.startMin);
+  }
+
+  /** 完成表单：用时 + 完成度。今日任务与补录行共用 */
+  function renderDoneForm(b: Block) {
+    if (editing !== b.id) return null;
+    return (
+      <div className="inline-form">
+        <label>
+          实际用时（分钟）
+          <input
+            type="number"
+            min={1}
+            step={5}
+            value={minutes}
+            onChange={(e) => setMinutes(Number(e.target.value))}
+            autoFocus
+          />
+        </label>
+        <label className="progress-field">
+          完成度 <b className="mono">{progressPct}%</b>
+          <input
+            type="range"
+            min={5}
+            max={100}
+            step={5}
+            value={progressPct}
+            onChange={(e) => setProgressPct(Number(e.target.value))}
+          />
+        </label>
+        {progressPct < 100 && (
+          <small className="form-hint">剩余的 {100 - progressPct}% 工作量会自动滚入下次排程，不会丢。</small>
+        )}
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => {
+            const safe = Math.max(1, Math.round(minutes));
+            void actions.setBlockStatus(b.id, 'done', safe, undefined, {
+              progressPct,
+              source: editingSource,
+            });
+            setEditing(null);
+          }}
+        >
+          确认完成
+        </Button>
+        <Button variant="quiet" size="sm" onClick={() => setEditing(null)}>
+          取消
+        </Button>
+      </div>
+    );
   }
 
   function renderTask(b: Block, showDate = false) {
@@ -107,7 +188,7 @@ export function TodayPage({
             {b.isBuffer && <span className="tag tag-buffer">弹性位</span>}
           </div>
           <div className="t-meta">
-            <StatusText block={b} />
+            <StatusText block={b} elapsedSec={elapsedSecOf(b)} />
           </div>
         </div>
         <div className="t-act">
@@ -133,6 +214,15 @@ export function TodayPage({
               <Button variant="primary" size="sm" onClick={() => startComplete(b)}>
                 完成
               </Button>
+              {b.startedAt ? (
+                <Button size="sm" onClick={() => void actions.pauseBlock(b.id)}>
+                  暂停
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => void actions.resumeBlock(b.id)}>
+                  继续
+                </Button>
+              )}
               <Button
                 variant="quiet"
                 size="sm"
@@ -153,35 +243,6 @@ export function TodayPage({
             </Button>
           )}
         </div>
-        {editing === b.id && (
-          <div className="inline-form">
-            <label>
-              实际用时（分钟）
-              <input
-                type="number"
-                min={1}
-                step={5}
-                value={minutes}
-                onChange={(e) => setMinutes(Number(e.target.value))}
-                autoFocus
-              />
-            </label>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                const safe = Math.max(1, Math.round(minutes));
-                void actions.setBlockStatus(b.id, 'done', safe);
-                setEditing(null);
-              }}
-            >
-              确认完成
-            </Button>
-            <Button variant="quiet" size="sm" onClick={() => setEditing(null)}>
-              取消
-            </Button>
-          </div>
-        )}
       </li>
     );
   }
@@ -267,7 +328,7 @@ export function TodayPage({
 
           <Panel
             title="今日执行"
-            desc="点「开始」进入执行，完成后填写实际用时"
+            desc="点「开始」开始计时，可随时暂停；完成时填实际用时与完成度"
             action={<span className="pill tone-quiet">{blocks.length} 块</span>}
           >
             {blocks.length === 0 ? (
@@ -300,13 +361,16 @@ export function TodayPage({
               {backfill.map((b) => {
                 const item = itemMap.get(b.itemId);
                 return (
-                  <div key={b.id} className="mini-row">
-                    {item && <span className={`tag tag-${item.subject}`}>{SUBJECT_LABEL[item.subject]}</span>}
-                    <b title={item?.title}>{item?.title ?? '已删除的任务'}</b>
-                    <time>{b.date.slice(5)}</time>
-                    <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'done')}>
-                      补录
-                    </Button>
+                  <div key={b.id}>
+                    <div className="mini-row">
+                      {item && <span className={`tag tag-${item.subject}`}>{SUBJECT_LABEL[item.subject]}</span>}
+                      <b title={item?.title}>{item?.title ?? '已删除的任务'}</b>
+                      <time>{b.date.slice(5)}</time>
+                      <Button variant="quiet" size="sm" onClick={() => startComplete(b, 'backfill')}>
+                        补录
+                      </Button>
+                    </div>
+                    {renderDoneForm(b)}
                   </div>
                 );
               })}
@@ -324,6 +388,7 @@ export function TodayPage({
                         <IconCheck />
                       </span>
                       <b title={item?.title}>{item?.title ?? '已删除的任务'}</b>
+                      {b.source === 'backfill' && <span className="tag tag-buffer">补录</span>}
                       <time>{b.date.slice(5)}</time>
                       <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
                         撤销
@@ -373,11 +438,14 @@ export function TodayPage({
   );
 }
 
-function StatusText({ block }: { block: Block }) {
+function StatusText({ block, elapsedSec }: { block: Block; elapsedSec: number }) {
   if (block.status === 'done') {
+    const pct = block.progressPct;
     return (
       <span className="ok">
         已完成 · 实际 {fmtDuration(block.actualMin ?? block.endMin - block.startMin)}
+        {typeof pct === 'number' && pct < 100 ? ` · 完成度 ${pct}%` : ''}
+        {block.source === 'backfill' ? ' · 补录' : ''}
       </span>
     );
   }
@@ -385,7 +453,7 @@ function StatusText({ block }: { block: Block }) {
     return (
       <span className="running-text">
         <i className="dot-status" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
-        执行中…
+        {block.startedAt ? `执行中 ${fmtClock(elapsedSec)}` : `已暂停 · 累计 ${fmtClock(elapsedSec)}`}
       </span>
     );
   }

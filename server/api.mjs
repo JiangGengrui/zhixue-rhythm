@@ -83,6 +83,10 @@ function normalizeBlock(row) {
     status: row.status,
     actualMin: row.actual_min ?? undefined,
     skipReason: row.skip_reason ?? undefined,
+    source: row.source ?? undefined,
+    progressPct: row.progress_pct ?? undefined,
+    accumulatedSec: row.accumulated_sec ?? 0,
+    startedAt: row.started_at ?? undefined,
   };
 }
 
@@ -122,6 +126,13 @@ export function createApi(db) {
     blocksByDate: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date = ?'),
     moveBlock: db.prepare('UPDATE blocks SET date = ?, start_min = ?, end_min = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     deleteBlock: db.prepare('DELETE FROM blocks WHERE id = ? AND user_id = ?'),
+    startRun: db.prepare("UPDATE blocks SET status='running', started_at=?, updated_at=? WHERE id=? AND user_id=?"),
+    pauseRun: db.prepare("UPDATE blocks SET accumulated_sec = accumulated_sec + ?, started_at=NULL, updated_at=? WHERE id=? AND user_id=?"),
+    resumeRun: db.prepare("UPDATE blocks SET started_at=?, updated_at=? WHERE id=? AND user_id=?"),
+    finishBlock: db.prepare("UPDATE blocks SET status='done', actual_min=?, progress_pct=?, source=?, started_at=NULL, updated_at=? WHERE id=? AND user_id=?"),
+    skipWithSource: db.prepare("UPDATE blocks SET status='skipped', skip_reason=?, source=?, updated_at=? WHERE id=? AND user_id=?"),
+    revertBlock: db.prepare("UPDATE blocks SET status='pending', actual_min=NULL, skip_reason=NULL, progress_pct=NULL, source=NULL, started_at=NULL, accumulated_sec=0, updated_at=? WHERE id=? AND user_id=?"),
+    refundWork: db.prepare('UPDATE items SET remaining_min = COALESCE(remaining_min, estimate_min) + ? WHERE id = ? AND user_id = ?'),
     deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done'"),
     clearItems: db.prepare('DELETE FROM items WHERE user_id = ?'),
     clearBlocks: db.prepare('DELETE FROM blocks WHERE user_id = ?'),
@@ -735,6 +746,20 @@ export function createApi(db) {
       q.insertOp.run(user.id, opId, nowISO());
     }
 
+    const source = body.source === 'backfill' ? 'backfill' : body.source === 'plan' ? 'plan' : block.source ?? 'plan';
+
+    // 计时控制：暂停 / 继续（不改状态，只影响计时）
+    const action = typeof body.action === 'string' ? body.action : '';
+    if (action === 'pause' || action === 'resume') {
+      if (block.status !== 'running') throw bad('E1037', '只有执行中的任务可以暂停或继续');
+      if (action === 'pause') {
+        if (block.started_at) q.pauseRun.run(elapsedSec(block.started_at), nowISO(), id, user.id);
+      } else if (!block.started_at) {
+        q.resumeRun.run(nowISO(), nowISO(), id, user.id);
+      }
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
+    }
+
     const status = String(body.status ?? '');
     assert(STATUSES.has(status), 'E1017', '状态取值不合法');
     const allowed = {
@@ -745,25 +770,51 @@ export function createApi(db) {
     };
     assert(allowed[block.status].includes(status), 'E1018', `不允许从 ${block.status} 变为 ${status}`);
 
-    let actualMin = null;
-    let skipReason = null;
-    if (status === 'done') {
-      const fallback = block.end_min - block.start_min;
-      actualMin = int(body.actualMin ?? fallback, '实际用时', 1, 1440);
+    if (status === 'running') {
+      q.startRun.run(nowISO(), nowISO(), id, user.id);
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
     }
+
+    if (status === 'done') {
+      const planned = block.end_min - block.start_min;
+      const progressPct = body.progressPct == null ? 100 : int(body.progressPct, '完成度', 1, 100);
+      let actualMin;
+      if (body.actualMin != null) {
+        actualMin = int(body.actualMin, '实际用时', 1, 1440);
+      } else {
+        // 未填写用时：由计时器推导（暂停段不计）
+        const sec = (block.accumulated_sec ?? 0) + (block.started_at ? elapsedSec(block.started_at) : 0);
+        actualMin = Math.max(1, Math.round(sec / 60));
+      }
+      q.finishBlock.run(actualMin, progressPct, source, nowISO(), id, user.id);
+      // 剩余工时按「完成的工作量」扣减：完成 60% 就只消耗 60% 的计划量，没做完的滚入下次排程
+      q.consumeWork.run(Math.round(planned * progressPct / 100), block.item_id, user.id);
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
+    }
+
     if (status === 'skipped') {
       const reason = String(body.skipReason ?? 'other');
       assert(SKIP_REASONS.has(reason), 'E1019', '跳过原因不合法');
-      skipReason = reason || 'other';
+      q.skipWithSource.run(reason || 'other', source, nowISO(), id, user.id);
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
     }
 
-    q.updateBlock.run(status, actualMin, skipReason, nowISO(), id, user.id);
-    // 完成时按实际投入扣减剩余工时（未完成的工作量留到下一次排程）
-    if (status === 'done' && actualMin) {
-      q.consumeWork.run(actualMin, block.item_id, user.id);
+    // 回退到待开始：撤销完成时把已消耗的工时加回去
+    if (block.status === 'done') {
+      const planned = block.end_min - block.start_min;
+      const pct = block.progress_pct ?? 100;
+      q.refundWork.run(Math.round(planned * pct / 100), block.item_id, user.id);
     }
+    q.revertBlock.run(nowISO(), id, user.id);
     return { block: normalizeBlock(q.blockById.get(id, user.id)) };
   }
+}
+
+/** ISO 时间到当前的秒数（≥0），用于计时推导 */
+function elapsedSec(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, Math.round((Date.now() - t) / 1000));
 }
 
 function startOfWeekISO(iso) {

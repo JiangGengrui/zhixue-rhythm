@@ -191,6 +191,16 @@ describe('deviationStats', () => {
     expect(d.p90).toBeCloseTo(1 / 3, 4);
   });
 
+  it('补录记录不参与偏差统计', () => {
+    const blocks = [
+      block({ id: '1', status: 'done', actualMin: 100, startMin: 1110, endMin: 1200 }),
+      block({ id: '2', status: 'done', actualMin: 500, startMin: 1110, endMin: 1200, source: 'backfill' }),
+    ];
+    const d = deviationStats(blocks);
+    expect(d.count).toBe(1);
+    expect(d.median).toBeCloseTo(1 / 9, 4);
+  });
+
   it('没有完成项时返回 0 而不是 NaN', () => {
     const d = deviationStats([]);
     expect(d).toEqual({ count: 0, median: 0, p90: 0 });
@@ -224,6 +234,20 @@ describe('buildReport', () => {
     const r = buildReport(blocks, settings, weekStart);
     expect(r.causes[0]!.key).toBe('capacity');
     expect(r.suggestion).toContain('超出');
+  });
+
+  it('补录计入达成与时长，但不进偏差与估时归因', () => {
+    const blocks = [
+      block({ id: '1', status: 'done', actualMin: 60, startMin: 1140, endMin: 1200 }),
+      block({ id: '2', status: 'done', actualMin: 600, startMin: 1140, endMin: 1200, source: 'backfill' }),
+    ];
+    const r = buildReport(blocks, settings, weekStart);
+    expect(r.doneCount).toBe(2);
+    expect(r.effectiveMin).toBe(660); // 补录时长照常计入
+    expect(r.backfillCount).toBe(1);
+    expect(r.deviation.count).toBe(1); // 偏差只看计时记录
+    const estimate = r.causes.find((c) => c.key === 'estimate');
+    expect(estimate?.share).toBe(0); // 估时归因排除补录
   });
 
   it('空数据不产生 NaN', () => {

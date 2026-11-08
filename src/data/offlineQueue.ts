@@ -2,8 +2,17 @@ import type { Block } from '../domain/types';
 
 const KEY = 'zhixue.ops.v1';
 
+export type StatusPatch = {
+  status?: Block['status'];
+  actualMin?: number;
+  skipReason?: Block['skipReason'];
+  progressPct?: number;
+  source?: 'plan' | 'backfill';
+  action?: 'pause' | 'resume';
+};
+
 export type PendingOp =
-  | { id: string; kind: 'status'; blockId: string; payload: { status: Block['status']; actualMin?: number; skipReason?: Block['skipReason'] }; createdAt: string }
+  | { id: string; kind: 'status'; blockId: string; payload: StatusPatch; createdAt: string }
   | { id: string; kind: 'move'; blockId: string; payload: { date: string; startMin: number }; createdAt: string }
   | { id: string; kind: 'delete'; blockId: string; payload: Record<string, never>; createdAt: string };
 

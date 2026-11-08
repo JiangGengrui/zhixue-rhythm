@@ -108,6 +108,20 @@ function migrate(db) {
     db.exec('ALTER TABLE users ADD COLUMN recovery_hash TEXT');
   }
 
+  const blockCols = db.prepare('PRAGMA table_info(blocks)').all();
+  if (!blockCols.some((c) => c.name === 'source')) {
+    db.exec("ALTER TABLE blocks ADD COLUMN source TEXT"); // plan | backfill
+  }
+  if (!blockCols.some((c) => c.name === 'progress_pct')) {
+    db.exec('ALTER TABLE blocks ADD COLUMN progress_pct INTEGER'); // 完成度 1-100
+  }
+  if (!blockCols.some((c) => c.name === 'accumulated_sec')) {
+    db.exec("ALTER TABLE blocks ADD COLUMN accumulated_sec INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!blockCols.some((c) => c.name === 'started_at')) {
+    db.exec('ALTER TABLE blocks ADD COLUMN started_at TEXT'); // 当前一段执行的开始时间；NULL=未在计时
+  }
+
   const cols = db.prepare('PRAGMA table_info(items)').all();
   if (!cols.some((c) => c.name === 'remaining_min')) {
     db.exec('ALTER TABLE items ADD COLUMN remaining_min INTEGER');
