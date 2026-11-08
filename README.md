@@ -1,158 +1,206 @@
-# 智学节律 · Web MVP（路线 B）
+<div align="center">
 
-真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
+# 智学节律 · Zhixue Rhythm
 
-**当前版本：v1.2.1** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 [docs/product/](./docs/product/)（PRD V2.0，第十八章为实现与迭代记录）
+**把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-## 版本历史
+[在线体验](https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-| 版本 | 主题 | 关键能力 |
+![version](https://img.shields.io/badge/version-1.2.1-2be6ae)
+![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
+![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
+![tests](https://img.shields.io/badge/tests-68%20passed-2be6ae)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
+
+</div>
+
+![产品主页](docs/screenshots/home.png)
+
+## 为什么做这个
+
+传统计划工具追求「全部完成」，一旦落下一项就让人想放弃。但现实是：估时会偏、会被打断、会有临时的事。
+
+智学节律从设计之初就承认这一点，三条原则贯穿全部功能：
+
+1. **留白也是计划** —— 每周留出约 15% 弹性位，用来吸收意外。
+2. **按自己的节奏** —— 用节律提醒代替 deadline 压迫，完成两件事也是进展。
+3. **复盘为下一步** —— 周报回答「时间去哪了」，并给出一条具体可执行的建议。
+
+## 功能
+
+| 空间 | 它能回答的问题 | 关键能力 |
 |---|---|---|
-| v0.1.0 | 前端 MVP 与领域引擎 | 四视图 + 可行性/装箱/偏差/归因引擎，本地持久化 |
-| v0.2.0 | 账号与服务端存储 | 注册登录、SQLite、按用户隔离、打卡状态机 |
-| v0.3.0 | 排程与周报下沉服务端 | 引擎前后端同源、设置页、重叠校验 |
-| v0.4.0 | 工时账本与数据权利 | 剩余工时扣减、跨周去重、导出、注销 |
-| v0.5.0 | 排程细化与任务调整 | 跨天拆分、任务块移动/删除、改密 |
-| v0.6.0 | 账号自救与首次上线 | 恢复码找回、API 契约、操作手册 |
-| v0.7.0 | 离线可用与运维备份 | 本地操作队列（幂等补传）、备份脚本 |
-| v1.0.0 | 线上发布与验收 | 全链路线上验收、发布流程固化 |
-| v1.0.1 | 主页入口修复 | 主页回到根路径、预览块死按钮、周日空计划提示 |
-| v1.0.2 | 交互缺陷修复 | 顶栏「设置目标」、生成/重排反馈、跨周预览、当日合计 |
-| v1.1.0 | 拆解与重排引擎 | 知识域树模板、三段式拆解与智能裁断、四级重排方案与三条硬约束 |
-| v1.2.0 | 拆解与重排接入界面 | 目标页「智能拆解」、周视图「重排建议」四方案卡 |
-| v1.2.1 | 主页视觉缺陷修复 | 卡片左缘闪烁、标语换词交叉淡入淡出 |
-| v1.1.0 | 界面改版与双主题 | 左侧导航 + 8/4 栅格、深空/冷光双主题、环形仪表、页面级动效、落地页同步 |
+| **目标** | 这个目标现实吗？要拆成什么？ | 可行性 R 值、知识域树拆解（3 套模板）、智能裁断 |
+| **周视图** | 这一周怎么装得下？ | 权重优先装箱、跨天拆分、弹性位、任务块移动/删除、重排方案 |
+| **今日** | 现在该做什么？ | 打卡状态机（开始/完成/跳过）、实际用时、补录与撤销 |
+| **周报** | 时间去哪了？ | 达成率、有效时长、估时偏差（中位数 + P90）、三类归因 |
 
-## 页面结构
-
-| 路径 | 页面 | 说明 |
-|---|---|---|
-| `/` | 产品主页 | 营销主页（Hero 动效、功能、理念、留言反馈），访客第一眼看到的页面 |
-| `/app.html` | 学习空间 | React 应用（登录后使用），主页「进入」跳转到这里 |
-
-> 根路径必须是产品主页——这是发布后最容易出问题的地方，路由改名前先确认这一点。
-
-## 线上地址
-
-https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ
-
-> 该应用与早期静态 demo 共用同一个平台应用记录，发布新版本会覆盖原 demo 页面（demo 源码仍保留在 `../web-demo`）。
-
-## 部署到线上
-
-已发布为 Node HTTP 服务，平台启动命令必须走 npm 脚本（`vite` 不在 PATH 中，直接写 `vite build` 会启动失败）：
-
-```
-语言：node
-启动命令：npm start        # = build:engine → tsc --noEmit → vite build → node server/index.mjs
-```
-
-发布前注意：本地 `data/` 目录不要一起上传，否则会把本地测试账号带到线上（发布前先移走）。
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/goal-decompose.png" alt="目标与智能拆解" /><br /><sub><b>目标</b> · 选用模板生成拆解草案，时间不够时按「低频低分 → 已有基础 → 可合并」裁断</sub></td>
+<td width="50%"><img src="docs/screenshots/week.png" alt="周视图" /><br /><sub><b>周视图</b> · 七天课表 + 容量占用，超过单日容量的任务自动拆到多天</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/today.png" alt="今日" /><br /><sub><b>今日</b> · 打卡记录实际用时，未排到的任务可就地补录</sub></td>
+<td><img src="docs/screenshots/report.png" alt="周报" /><br /><sub><b>周报</b> · 指标由服务端按真实记录计算，归因三类合计恒为 100%</sub></td>
+</tr>
+</table>
 
 ## 快速开始
 
+需要 **Node.js 22+**（后端使用内置的 `node:sqlite`，无第三方数据库依赖）。
+
 ```bash
 npm install
-npm start          # 构建 + 启动 API 与页面：http://localhost:8787
+npm start            # 构建 + 启动：# http://localhost:8787
 ```
 
-开发模式（前端热更新 + 后端分离）：
+打开后注册一个账号即可使用（密码 ≥ 8 位，数据按账号隔离）。注册时会给出一枚**一次性恢复码**，忘记密码只能靠它重置。
+
+开发模式（前端热更新，API 与静态资源分离）：
 
 ```bash
-npm run server     # 终端 1：API + SQLite，:8787
-npm run dev        # 终端 2：Vite :5173，/api 代理到 8787
+npm run server       # 终端 1：API + SQLite → :8787
+npm run dev          # 终端 2：Vite → :5173，/api 代理到 8787
 ```
 
-首次打开是登录页，注册一个账号即可使用（密码 ≥ 8 位，数据按账号隔离）。
-
-## 技术栈与结构
+## 技术栈
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 前端 | React 19 + TypeScript（strict）+ Vite 6 | 组件化，纯 CSS 令牌（深/浅两套），无 UI 框架 |
-| 后端 | Node 22 `node:http` + `node:sqlite` | 零依赖、单文件数据库，一条命令跑起来 |
-| 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库；登出/改密/重置密码都会失效；注册下发一次性恢复码用于找回 |
-| 测试 | Vitest（引擎）+ `node:test`（API）+ CDP E2E | 68 条自动化用例 + 23 步浏览器验收 |
-| 离线 | 本地操作队列（localStorage）+ `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
-| 同构 | esbuild 把 `src/domain/engine.ts` 打成 `server/engine.generated.mjs` | 排程与周报前后端共用**同一份源码**，不存在两套算法 |
+| 前端 | React 19 + TypeScript（strict）+ Vite 6 | 纯 CSS 设计令牌，深空 / 冷光双主题，无 UI 框架 |
+| 后端 | Node 22 `node:http` + `node:sqlite` | 零第三方依赖，单文件数据库 |
+| 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出/改密/重置密码即失效 |
+| 同构 | esbuild 把 `src/domain` 打成服务端模块 | 排程与周报**前后端共用同一份源码**，不存在两套算法 |
+| 离线 | localStorage 操作队列 + `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
+| 测试 | Vitest + `node:test` + CDP | 68 条自动化用例 + 23 项浏览器端到端 |
 
-> 说明：架构文档原定 Go + Postgres。当前环境无 Go/Postgres，为满足"一条命令可运行"，后端先用 Node + SQLite 实现，**接口契约与领域规则保持不变**，后续平移 Go 时前端无需改动。
+> 架构文档原定 Go + Postgres。当前环境没有这两者，为了「一条命令就能跑」，后端先落在 Node + SQLite 上；**接口契约与领域规则保持一致**，后续平移 Go 时前端无需改动。
 
-```
-server/
-├── index.mjs      HTTP 入口：路由分发、静态资源、统一错误
-├── api.mjs        业务接口 + 校验 + 状态机
-├── auth.mjs       scrypt 哈希、会话、Cookie、登录限流
-├── db.mjs         SQLite 打开与建表（幂等迁移）
-├── engine.generated.mjs  由 src/domain/engine.ts 打包而来（构建产物，勿手改）
-└── api.test.mjs   19 条接口测试（越权/幂等/非法迁移/导出/注销/恢复码）
-src/
-├── domain/        纯函数引擎（可行性 / 装箱 / 偏差 / 归因 / 拆解 / 重排）+ 40 条单测
-│   ├── templates.ts   知识域树模板（3 类目标）
-│   ├── decompose.ts   三段式拆解：模板骨架 → 参数填充 → 智能裁断
-│   └── replan.ts      重排：触发检测 + 四级方案 + 三条硬约束
-├── data/api.ts    唯一 HTTP 客户端
-├── data/offlineQueue.ts  离线操作队列（断网暂存 + opId 幂等补传）
-├── store.ts       会话 + 服务端状态（前端唯一数据出口，含乐观更新）
-├── pages/         Auth / Today / Goal / Week / Report / Settings
-└── components.tsx Card / Stat / Button / Field / Empty / Meter
-scripts/e2e.mjs    真实 Chrome 走完整链路并截图
-scripts/backup.mjs 数据库冷备（checkpoint + 保留最近 14 份）
-scripts/flicker-probe.mjs 逐帧差分定位闪烁区域
-scripts/morph-probe.mjs   换词动画逐帧采样
-scripts/shot.mjs          通用截图（支持浅色主题与整页）
-public/three-effects.js  主页 3D 吊牌（three.js 动态加载）
-index.html        产品主页（营销页，多页构建入口之一）
-app.html          学习空间（React 应用）
-docs/product/      PRD（V2.0）/ 技术架构设计 / 实施规划
-docs/openapi.yaml  API 契约
-docs/操作手册.md    启动、备份、回滚、排障
-docs/拆解与重排接入说明.md  给前端/UI 的接口与呈现约定
-CHANGELOG.md       版本变更记录（v0.1.0 → v1.0.0）
+## 架构
+
+```mermaid
+flowchart LR
+  G["目标 + 计划项"] -->|decomposeGoal| D["阶段草案<br/>基础/强化/冲刺"]
+  D -->|"采纳 → planItems"| I["计划项"]
+  I -->|packWeek| B["本周任务块"]
+  B -->|打卡| L["实际用时"]
+  L -->|buildReport| R["周报<br/>达成率 / 偏差 / 归因"]
+  R -->|planReplan| B
+  R -->|adjustGoal| G
 ```
 
-## 接口约定
+领域层是**纯函数**，不读时钟、不读数据库、不用随机数——同样的输入永远得到同样的结果，测试因此可以断言具体数值。
 
-| 方法 | 路径 | 说明 |
+| 引擎 | 位置 | 规则要点 |
 |---|---|---|
-| POST | `/api/auth/register` | 注册并建立会话 |
-| POST | `/api/auth/login` | 登录（同 IP 每分钟限 10 次） |
-| POST | `/api/auth/logout` | 登出，销毁会话 |
-| GET | `/api/state` | 当前用户的目标、计划项、任务块、设置 |
-| PUT | `/api/goal` | 新建或更新目标（单用户唯一） |
-| POST | `/api/items` | 添加计划项 |
-| DELETE | `/api/items/:id` | 删除计划项并级联清理其任务块 |
-| PUT | `/api/settings` | 每周可用时段、周起始日 |
-| POST | `/api/plan/generate` | 服务端生成某周计划：`from` 从今天起排；只补排没有块的任务，已完成记录不被覆盖；跨周已排任务不重复排 |
-| GET | `/api/report?week=` | 服务端计算周报（达成率/时长/偏差/归因） |
-| PUT | `/api/blocks` | 覆盖某周任务块（校验同日不重叠） |
-| PATCH | `/api/blocks/:id` | 打卡状态迁移（带 `opId` 幂等）或**同周移动时间**（改 `date`/`startMin`，时长不变，拒绝重叠与跨周）；完成时按实际投入扣减剩余工时 |
-| DELETE | `/api/blocks/:id` | 删除单个任务块，任务回到待排池 |
-| POST | `/api/auth/password` | 修改密码：校验旧密码，旧会话全部失效并下发新会话 |
-| GET | `/api/export?format=json\|csv` | 导出全部数据（JSON）或任务记录（CSV，带 BOM） |
-| GET | `/api/decompose/templates` | 拆解模板清单（考研 / 考公 / 项目导学） |
-| POST | `/api/goal/decompose` | 拆解目标为计划项草案；`apply=true` 才写库（需 `replace=true` 确认覆盖） |
-| GET | `/api/plan/replan?week=` | 重排方案预览（顺延/压缩/替代/放弃），不写库 |
-| POST | `/api/plan/replan/apply` | 应用选定方案，重写本周未完成块并记录重排次数 |
-| DELETE | `/api/account` | 注销账号：校验密码、级联删除数据、会话失效 |
+| 可行性 | `domain/engine.ts` | `R = 需求工时 ÷（周可用 × 剩余周数 × 0.85）`，四档判定：从容 / 合理 / 偏紧 / 不可行 |
+| 装箱 | `domain/engine.ts` | 权重优先；超过单日容量自动拆到多天；弹性位只在剩余量能整块放下时启用 |
+| 偏差 | `domain/engine.ts` | 取实际 ÷ 预估的偏差中位数与 P90（P90 用来判断最差情况） |
+| 归因 | `domain/engine.ts` | 计划容量 / 执行中断 / 任务估时，三类合计恒为 100% |
+| 拆解 | `domain/decompose.ts` | 模板骨架 → 参数填充 → 智能裁断；每次裁断都记录原因，不做隐性欠账 |
+| 重排 | `domain/replan.ts` | 顺延 → 压缩 → 替代 → 放弃；负载增幅 > 20% 判不可行；同周重排 3 次仍装不下就转为目标校准建议 |
 
-错误统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。
+## 项目结构
 
-## 已验证
+```
+src/
+├── domain/            纯函数领域层（无 React、无 IO）+ 44 条单测
+│   ├── templates.ts     知识域树模板（考研 / 考公 / 项目导学）
+│   ├── decompose.ts     三段式拆解
+│   └── replan.ts        重排方案生成
+├── data/api.ts        唯一的 HTTP 客户端
+├── data/offlineQueue.ts  离线操作队列（断网暂存 + 幂等补传）
+├── store.ts           会话与状态（前端唯一数据出口，含乐观更新）
+├── pages/             Auth / Today / Goal / Week / Report / Settings
+└── components.tsx     Card / Stat / Button / Field / Empty / Meter
+server/
+├── index.mjs          HTTP 入口：路由、静态资源、统一错误
+├── api.mjs            业务接口 + 校验 + 状态机
+├── auth.mjs           scrypt 哈希、会话、Cookie、登录限流
+├── db.mjs             SQLite 建表与幂等迁移
+└── engine.generated.mjs  由 src/domain 打包而来（构建产物，勿手改）
+scripts/
+├── e2e.mjs            真实 Chrome 走完整链路并截图
+├── demo-shots.mjs     生成 README 展示图（真实数据）
+├── backup.mjs         数据库冷备（checkpoint + 保留 14 份）
+└── shot.mjs           通用截图（支持浅色主题 / 整页）
+index.html             产品主页（营销页，多页构建入口）
+app.html              学习空间（React 应用）
+docs/product/         PRD（V2.0）/ 技术架构设计 / 实施规划
+docs/openapi.yaml     API 契约
+docs/操作手册.md        启动、备份、回滚、排障
+```
 
-| 检查 | 结果 |
+## 接口
+
+接口全部挂在 `/api` 下，统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。完整定义见 [docs/openapi.yaml](docs/openapi.yaml)。
+
+| 分组 | 主要端点 |
 |---|---|
-| `npm test` | 68 条通过（引擎 44 + 接口 24） |
-| `npx tsc --noEmit` | 0 错误 |
-| `npm run build` | 成功（JS 259KB / gzip 81.6KB，CSS 10.4KB / gzip 2.9KB） |
-| `node scripts/e2e.mjs` | 17 步全通过：未登录深链拦截 → 注册 → 载入示例 → 生成周计划 → 同周移动任务 → 打卡 → 服务端周报 → **断网打卡 → 恢复补传** → 刷新保持 → 改设置 → 修改密码 → 按新容量补排 → 登出 → 忘记密码入口 → 控制台零报错 |
+| 账号 | `POST /api/auth/register` · `login` · `logout` · `password` · `recover` |
+| 目标与计划项 | `GET /api/state` · `PUT /api/goal` · `POST /api/items` · `DELETE /api/items/:id` |
+| 拆解 | `GET /api/decompose/templates` · `POST /api/goal/decompose`（`apply=true` 才写库） |
+| 排程 | `POST /api/plan/generate` · `GET /api/plan/replan` · `POST /api/plan/replan/apply` |
+| 执行 | `PATCH /api/blocks/:id`（打卡 / 同周移动，带 `opId` 幂等） · `DELETE /api/blocks/:id` |
+| 复盘 | `GET /api/report?week=` |
+| 数据权利 | `GET /api/export?format=json\|csv` · `DELETE /api/account` |
+| 主页公开接口 | `GET/POST /api/feedback` · `GET/POST /api/visit`（免登录，按 IP 限流） |
 
-安全边界：所有查询按 `user_id` 过滤；越权改他人任务块返回 404；计划项不能跨用户塞入；口令与 Cookie 不落日志；请求体上限 1MB；密码错 10 次/分钟限流。
+## 测试
 
-## 已知限制（下一轮处理）
+```bash
+npm test              # 领域单测 + 接口测试（68 条）
+npm run test:unit     # 只跑领域单测
+npm run test:api      # 只跑接口测试
+npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
+```
 
-1. 忘记密码依赖注册时下发的恢复码（无邮件通道）；恢复码丢失则无法自助找回。
-2. 多端并发仍以服务端为准（后写覆盖），未做字段级冲突合并；离线队列只保证单设备按序补传。
-3. 「补排新任务」只处理本周还没有块的任务；调整时间请用任务块上的「调整」。
-4. 弹性位只在剩余量能整块放下时使用，极端情况下会留出未利用的弹性时间（保证不把任务切碎）。
-5. 后端为 Node + SQLite（环境无 Go/Postgres），契约已固化以便后续平移。
+| 层次 | 覆盖重点 |
+|---|---|
+| 领域单测（44） | 空数据、容量为 0、超额、跨天拆分、确定性、目标日期已过、裁断顺序、重排硬约束 |
+| 接口测试（24） | 越权隔离、幂等、非法状态迁移、导出、注销、恢复码、重叠校验、拆解与重排 |
+| 端到端（23） | 未登录深链拦截 → 注册 → 拆解 → 排程 → 移动任务 → 打卡 → 断网补传 → 周报 → 改设置 → 改密 → 登出 |
+
+安全边界：所有查询按 `user_id` 过滤，越权读写返回 404；口令与 Cookie 不进日志；请求体上限 1 MB；登录与留言按 IP 限流。
+
+## 版本
+
+当前 **v1.2.1**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
+
+| 版本 | 主题 |
+|---|---|
+| v0.1.0 | 前端 MVP 与领域引擎（四视图 + 可行性/装箱/偏差/归因） |
+| v0.2.0 | 账号体系与服务端存储（SQLite、按用户隔离、打卡状态机） |
+| v0.3.0 | 排程与周报下沉服务端，引擎前后端同源 |
+| v0.4.0 | 剩余工时账本、跨周去重、数据导出与账号注销 |
+| v0.5.0 | 跨天拆分、任务块移动/删除、修改密码 |
+| v0.6.0 | 恢复码找回、API 契约与操作手册、首次上线 |
+| v0.7.0 | 离线队列与数据库备份 |
+| v1.0.0 | 线上发布与全链路验收 |
+| v1.1.0 | 界面改版（深空/冷光双主题）+ 拆解与重排引擎 |
+| v1.2.0 | 拆解与重排接入界面 |
+| v1.2.1 | 主页卡缘闪烁与换词动画修复 |
+
+## 已知限制
+
+1. **忘记密码依赖恢复码**：没有邮件通道，恢复码丢失则无法自助找回。
+2. **多端并发以服务端为准**：后写覆盖，未做字段级冲突合并；离线队列只保证单设备按序补传。
+3. **重排是保守策略**：剩余工时远大于本周容量时，四个方案都会被判「超载」并禁用，此时应调整目标而不是继续排。
+4. **后端为 Node + SQLite**：适合单机演示与课程交付，生产部署需换 Postgres 并做连接池与迁移管理。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [智学节律 产品需求文档 V2.0](docs/product/智学节律%20产品需求文档.docx) | 17 章功能定义 + 第十八章「实现与迭代记录」（逐轮交付与 P0 状态对照） |
+| [智学节律 技术架构设计](docs/product/智学节律%20技术架构设计.docx) | 技术选型、模块划分、数据模型 |
+| [从 Demo 到正式开发的实施规划](docs/product/从Demo到正式开发%20实施规划%20v1.0.md) | 三条路线对比、模块优先级、六阶段推进与验收标准 |
+| [API 契约](docs/openapi.yaml) | 全部端点的请求/响应与错误码 |
+| [操作手册](docs/操作手册.md) | 启动、备份、回滚、排障 |
+| [拆解与重排接入说明](docs/拆解与重排接入说明.md) | 给前端/UI 的接口形状与呈现约定 |
+
+## License
+
+MIT
