@@ -197,7 +197,7 @@ function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }
 }
 
 export default function App() {
-  const { phase, error, state, actions, recoveryCode, pendingOps, notifs } = useAppState();
+  const { phase, error, state, actions, recoveryCode, pendingOps, notifs, offlineSince } = useAppState();
 
   // 通知轮询：登录态下每 60 秒刷新一次预警
   useEffect(() => {
@@ -271,6 +271,9 @@ export default function App() {
       </div>
     );
   }
+
+  // 离线冷启动：用上次同步的数据只读展示；联网后「重试」即恢复
+  const isOffline = phase === 'offline';
 
   const initial = (state.user?.name ?? '学').slice(0, 1);
 
@@ -408,6 +411,18 @@ export default function App() {
           <div className="page" style={{ paddingBottom: 0 }}>
             <div className="banner" role="alert">
               {error}
+            </div>
+          </div>
+        )}
+
+        {isOffline && (
+          <div className="page" style={{ paddingBottom: 0 }}>
+            <div className="banner" role="status" style={{ background: '#fdf6ec', color: '#8a6432', borderColor: '#f0dcc2' }}>
+              离线模式：显示 {offlineSince ? offlineSince.slice(5, 16).replace('T', ' ') : '上次'} 同步的数据。
+              打卡等操作可以照常进行，联网后会自动同步；刷新本页即可重新连接。
+              <Button variant="quiet" size="sm" style={{ marginLeft: 10 }} onClick={() => void actions.refresh()}>
+                重试连接
+              </Button>
             </div>
           </div>
         )}

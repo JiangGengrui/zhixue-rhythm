@@ -56,3 +56,47 @@ export function clearOps(): PendingOp[] {
 
 export const isOfflineError = (err: unknown): boolean =>
   typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 0;
+
+
+/* ── 离线快照：最近一次成功同步的服务端状态，供断网冷启动只读展示 ── */
+
+const SNAP_KEY = 'zhixue.snapshot.v1';
+
+export interface StateSnapshot {
+  user: { id: string; name: string; email: string };
+  goal: unknown;
+  items: unknown[];
+  blocks: unknown[];
+  settings: unknown;
+  savedAt: string;
+}
+
+export function saveSnapshot(state: Omit<StateSnapshot, 'savedAt'>): void {
+  try {
+    localStorage.setItem(
+      SNAP_KEY,
+      JSON.stringify({ ...state, savedAt: new Date().toISOString() } satisfies StateSnapshot),
+    );
+  } catch {
+    /* 空间不足时静默放弃，不影响主流程 */
+  }
+}
+
+export function loadSnapshot(): StateSnapshot | null {
+  try {
+    const raw = localStorage.getItem(SNAP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StateSnapshot;
+    return parsed && typeof parsed.savedAt === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSnapshot(): void {
+  try {
+    localStorage.removeItem(SNAP_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}

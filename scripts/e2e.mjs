@@ -511,6 +511,27 @@ async function main() {
   await cdp.shot('08c-delete');
   console.log('✓ 删除任务块后当日合计同步更新');
 
+  // 8d. 离线冷启动：断网状态下刷新，应用用本地快照只读展示
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+  });
+  await cdp.send('Page.navigate', { url: base });
+  await sleep(2500);
+  body = await cdp.text();
+  assert(body.includes('离线模式'), '断网冷启动未进入离线模式');
+  assert(body.includes('生成本周计划') || body.includes('今日'), '离线模式下数据未展示');
+  await cdp.shot('08d-offline-cold');
+  console.log('✓ 离线冷启动：快照只读展示');
+
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+  });
+  await cdp.send('Page.navigate', { url: base });
+  await sleep(2200);
+  body = await cdp.text();
+  assert(!body.includes('离线模式'), '联网后未恢复在线模式');
+  console.log('✓ 联网后恢复在线模式');
+
   // 9. 登出后回到登录页（新 UI 的登出入口在「设置」页底部）
   await cdp.click('设置');
   await sleep(700);

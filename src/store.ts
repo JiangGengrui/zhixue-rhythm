@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from './data/api';
-import { enqueue, isOfflineError, loadOps, removeOp } from './data/offlineQueue';
+import { clearSnapshot, enqueue, isOfflineError, loadOps, loadSnapshot, removeOp, saveSnapshot } from './data/offlineQueue';
 import type { StatusPatch } from './data/offlineQueue';
 import type { DecomposeResponse, ReplanOptionView, ReplanResponse, SessionUser } from './data/api';
 import { addDays, todayISO, weekDates } from './domain/date';
@@ -11,7 +11,7 @@ export const defaultSettings: Settings = {
   weekdays: [0, 150, 150, 150, 150, 150, 120],
 };
 
-export type Phase = 'loading' | 'guest' | 'ready' | 'error';
+export type Phase = 'loading' | 'guest' | 'ready' | 'error' | 'offline';
 
 export interface AppState {
   user: SessionUser | null;
@@ -79,6 +79,7 @@ export function useAppState() {
   const [error, setError] = useState<string | null>(null);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [pendingOps, setPendingOps] = useState<number>(() => loadOps().length);
+  const [offlineSince, setOfflineSince] = useState<string | null>(null);
   const [notifs, setNotifs] = useState<{ items: Array<{ id: number; kind: string; level: 'info' | 'warn' | 'danger'; title: string; body: string; createdAt: string; read: boolean }>; unread: number }>({ items: [], unread: 0 });
 
   const loadNotifications = useCallback(async () => {
@@ -110,12 +111,31 @@ export function useAppState() {
       });
       setPhase('ready');
       setError(null);
+      setOfflineSince(null);
+      saveSnapshot(s);
       void loadNotifications();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setPhase('guest');
         setState(emptyState);
+        clearSnapshot();
         return;
+      }
+      if (isOfflineError(err)) {
+        const snap = loadSnapshot();
+        if (snap) {
+          // 离线冷启动：用上次同步的数据只读展示，写操作仍会进入队列
+          setState({
+            user: snap.user as typeof state.user,
+            goal: snap.goal as typeof state.goal,
+            items: snap.items as typeof state.items,
+            blocks: snap.blocks as typeof state.blocks,
+            settings: snap.settings as typeof state.settings,
+          });
+          setOfflineSince(snap.savedAt);
+          setPhase('offline');
+          return;
+        }
       }
       setError(messageOf(err));
       setPhase('error');
@@ -168,6 +188,7 @@ export function useAppState() {
   const dismissRecovery = useCallback(() => setRecoveryCode(null), []);
 
   const logout = useCallback(async () => {
+    clearSnapshot();
     await api.logout().catch(() => undefined);
     setState(emptyState);
     setPhase('guest');
@@ -531,6 +552,7 @@ export function useAppState() {
     state,
     recoveryCode,
     pendingOps,
+    offlineSince,
     notifs,
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
