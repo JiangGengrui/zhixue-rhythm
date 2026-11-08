@@ -1,23 +1,509 @@
 /**
- * three-effects.js — ReactBits 风格 3D 物理组件（原生移植版）
- *  - Ballpit：3D 刚体球堆，鼠标可推挤（自实现球-球/球-墙碰撞）
- *  - Lanyard：绳索约束的吊牌，可拖拽甩动（单摆 + 惯性）
- * 依赖 three.js（CDN ES Module），加载失败时静默降级，不影响页面其他功能。
+ * three-effects.js — 页面物理交互组件（原生移植版）
+ *  - 玻璃吊牌（Lanyard 区）：2D Canvas 绘制的半透明卡片，可拖拽，弹簧惯性 + 边界回弹
+ *  - Ballpit：3D 刚体球堆（仅当页面存在 #ballpit-layer 时才加载 three.js）
+ * 依赖：玻璃吊牌零依赖；Ballpit 需要 three.js（CDN ES Module），加载失败静默降级。
  */
 
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const start = () => {
-  // 用动态 import 加载 three：jsDelivr 带 CORS 头，file:// 直接打开也能工作
-  import(THREE_URL).then((THREE) => {
-    const ballHost = document.getElementById('ballpit-layer');
-    const lanyardHost = document.getElementById('lanyard-stage');
-    if (ballHost) initBallpit(THREE, ballHost);
-    if (lanyardHost) initLanyard(THREE, lanyardHost);
-  }).catch((err) => {
-    console.warn('[three-effects] three.js 加载失败，3D 效果已跳过', err);
-  });
+  const frogHost = document.getElementById('lanyard-stage');
+  if (frogHost) initCard(frogHost);
+
+  // 只有在真的用到 3D 球堆时才去拉 three.js，避免主页多余的网络依赖
+  const ballHost = document.getElementById('ballpit-layer');
+  if (ballHost) {
+    import(THREE_URL)
+      .then((THREE) => initBallpit(THREE, ballHost))
+      .catch((err) => {
+        console.warn('[three-effects] three.js 加载失败，3D 效果已跳过', err);
+      });
+  }
+
+  /* ══════════════════ 玻璃卡：可拖拽的半透明吊牌（2D Canvas） ══════════════════ */
+  function initCard(host) {
+    const cv = document.createElement('canvas');
+    cv.setAttribute('aria-hidden', 'true');
+    cv.style.touchAction = 'none';
+    host.appendChild(cv);
+    const ctx = cv.getContext('2d');
+
+    let W = 1;
+    let H = 1;
+    let DPR = 1;
+    let cw = 210; // 卡片宽（CSS px）
+    let ch = 130; // 卡片高
+    let anchor = { x: 0, y: 0 };
+    let rest = { x: 0, y: 0 };
+    const pos = { x: 0, y: 0 };
+    const vel = { x: 0, y: 0 };
+    let rot = 0;
+    let squash = 0;
+    let lift = 0;
+    let placed = false;
+    let interacted = false;
+    let time = 0;
+    const pointer = { x: 0, y: 0, inside: false };
+    let dragging = false;
+    let grab = { x: 0, y: 0 };
+    let prev = performance.now();
+    let raf = 0;
+    let visible = true;
+
+    const MAX_ROT = 0.12; // 最大倾斜，避免贴边时被裁切
+    const RADIUS = 18;
+
+    /* ── 尺寸与边界 ── */
+    function bounds() {
+      const hw = cw / 2 + (ch / 2) * Math.sin(MAX_ROT) + 4;
+      const hh = ch / 2 + (cw / 2) * Math.sin(MAX_ROT) + 10; // 顶部挂环也算进去
+      return { minX: hw, maxX: W - hw, minY: hh, maxY: H - hh };
+    }
+
+    function layout() {
+      W = Math.max(1, host.clientWidth);
+      H = Math.max(1, host.clientHeight);
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = Math.round(W * DPR);
+      cv.height = Math.round(H * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      cw = Math.max(168, Math.min(224, W * 0.68));
+      ch = cw / 1.62;
+      anchor = { x: W * 0.5, y: H * 0.05 };
+      rest = { x: W * 0.5, y: H * 0.56 };
+
+      if (!placed || !interacted) {
+        // 容器尺寸稳定前不认第一次布局，避免初始落点被夹到顶边
+        pos.x = rest.x;
+        pos.y = rest.y;
+        placed = true;
+      }
+      const b = bounds();
+      pos.x = clamp(pos.x, b.minX, b.maxX);
+      pos.y = clamp(pos.y, b.minY, b.maxY);
+    }
+
+    /* ── 物理 ── */
+    function clamp(v, a, b) {
+      return v < a ? a : v > b ? b : v;
+    }
+
+    function bump(speed) {
+      squash = Math.min(0.8, Math.abs(speed) / 1600 + 0.16);
+    }
+
+    function step(dt) {
+      const b = bounds();
+      const swayX = rest.x + Math.sin(time * 0.75) * 2.6;
+      const swayY = rest.y + Math.sin(time * 1.15) * 2.0;
+
+      if (dragging) {
+        // 带阻尼地追指针，松手后自然保留速度
+        const tx = clamp(pointer.x + grab.x, b.minX, b.maxX);
+        const ty = clamp(pointer.y + grab.y, b.minY, b.maxY);
+        const k = 1 - Math.exp(-dt * 20);
+        const nx = pos.x + (tx - pos.x) * k;
+        const ny = pos.y + (ty - pos.y) * k;
+        vel.x = (nx - pos.x) / Math.max(dt, 1e-3);
+        vel.y = (ny - pos.y) / Math.max(dt, 1e-3);
+        pos.x = nx;
+        pos.y = ny;
+      } else {
+        const ax = (swayX - pos.x) * 24 - vel.x * 7.2;
+        const ay = (swayY - pos.y) * 24 - vel.y * 7.2;
+        vel.x += ax * dt;
+        vel.y += ay * dt;
+        pos.x += vel.x * dt;
+        pos.y += vel.y * dt;
+
+        // 撞墙回弹
+        if (pos.x < b.minX) {
+          pos.x = b.minX;
+          if (vel.x < 0) {
+            bump(vel.x);
+            vel.x = -vel.x * 0.58;
+            vel.y *= 0.95;
+          }
+        } else if (pos.x > b.maxX) {
+          pos.x = b.maxX;
+          if (vel.x > 0) {
+            bump(vel.x);
+            vel.x = -vel.x * 0.58;
+            vel.y *= 0.95;
+          }
+        }
+        if (pos.y < b.minY) {
+          pos.y = b.minY;
+          if (vel.y < 0) {
+            bump(vel.y);
+            vel.y = -vel.y * 0.55;
+            vel.x *= 0.95;
+          }
+        } else if (pos.y > b.maxY) {
+          pos.y = b.maxY;
+          if (vel.y > 0) {
+            bump(vel.y);
+            vel.y = -vel.y * 0.55;
+            vel.x *= 0.95;
+          }
+        }
+      }
+
+      // 姿态：跟着吊绳的倾角，外加一点速度甩动
+      const below = pos.y > anchor.y + 6;
+      const ropeAngle = below ? clamp(Math.atan2(pos.x - anchor.x, pos.y - anchor.y), -0.5, 0.5) : 0;
+      const target = clamp(ropeAngle * 0.32 + clamp(vel.x * 0.00012, -0.05, 0.05), -MAX_ROT, MAX_ROT);
+      rot += (target - rot) * Math.min(1, dt * 8);
+      squash = Math.max(0, squash - dt * 3.6);
+      lift += ((dragging ? 1 : 0) - lift) * Math.min(1, dt * 10);
+    }
+
+    /* ── 绘制 ── */
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function clipPoint(side) {
+      // 卡片上沿的两个挂点
+      const lx = side * cw * 0.32;
+      const ly = -ch * 0.5 - 2;
+      return {
+        x: pos.x + lx * Math.cos(rot) - ly * Math.sin(rot),
+        y: pos.y + lx * Math.sin(rot) + ly * Math.cos(rot),
+      };
+    }
+
+    function drawStraps() {
+      const restLen = Math.max(30, rest.y - ch * 0.5 - anchor.y);
+      [-1, 1].forEach((side) => {
+        const to = clipPoint(side);
+        const dx = to.x - anchor.x;
+        const dy = to.y - anchor.y;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        const slack = clamp((restLen - dist) / restLen, 0, 1);
+        const cx = (anchor.x + to.x) / 2 + (-dy / dist) * slack * 10;
+        const cy = (anchor.y + to.y) / 2 + (dx / dist) * slack * 7 + slack * 12;
+
+        const grad = ctx.createLinearGradient(anchor.x, anchor.y, to.x, to.y);
+        grad.addColorStop(0, 'rgba(160,190,200,0.28)');
+        grad.addColorStop(1, 'rgba(200,235,228,0.62)');
+
+        ctx.beginPath();
+        ctx.moveTo(anchor.x, anchor.y);
+        ctx.quadraticCurveTo(cx, cy, to.x, to.y);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2.4;
+        ctx.stroke();
+
+        // 挂点小环
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, 3.2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(214,236,231,0.85)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, 5.4, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(214,236,231,0.22)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+
+      // 顶部固定点
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(43,230,174,0.85)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, 6.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(43,230,174,0.22)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    function drawContent(w, h) {
+      const pad = 18;
+      const left = -w / 2 + pad;
+      const top = -h / 2 + pad;
+
+      // 品牌标记：三根律动柱
+      const bars = [9, 17, 12];
+      bars.forEach((bh, i) => {
+        ctx.fillStyle = i === 1 ? 'rgba(43,230,174,0.95)' : 'rgba(43,230,174,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(left + i * 5.5, top + (17 - bh), 3, bh, 1.6);
+        ctx.fill();
+      });
+
+      // 标题
+      ctx.fillStyle = 'rgba(233,242,240,0.92)';
+      ctx.font = '600 13px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('智学节律', left + 24, top + 8);
+
+      // 右上角状态点
+      const dotX = w / 2 - pad - 4;
+      const dotY = top + 8;
+      const pulse = 0.55 + Math.sin(time * 2.2) * 0.25;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 6, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(43,230,174,${0.12 * pulse})`;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(43,230,174,${0.55 + pulse * 0.4})`;
+      ctx.fill();
+
+      // 底部：一条极细的进度发丝线
+      const lineY = h / 2 - pad - 10;
+      ctx.beginPath();
+      ctx.moveTo(left, lineY);
+      ctx.lineTo(w / 2 - pad, lineY);
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const ratio = 0.62;
+      const grad = ctx.createLinearGradient(left, 0, left + (w - pad * 2) * ratio, 0);
+      grad.addColorStop(0, 'rgba(43,230,174,0.95)');
+      grad.addColorStop(1, 'rgba(72,200,255,0.75)');
+      ctx.beginPath();
+      ctx.moveTo(left, lineY);
+      ctx.lineTo(left + (w - pad * 2) * ratio, lineY);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      // 底部文字
+      ctx.fillStyle = 'rgba(147,166,176,0.85)';
+      ctx.font = '400 8.5px "SF Mono",Consolas,monospace';
+      ctx.fillText('RHYTHM OS · 2027', left, h / 2 - pad + 2);
+
+      ctx.fillStyle = 'rgba(43,230,174,0.85)';
+      ctx.textAlign = 'right';
+      ctx.fillText('62%', w / 2 - pad, h / 2 - pad + 2);
+      ctx.textAlign = 'left';
+    }
+
+    function drawCard() {
+      const w = cw;
+      const h = ch;
+      const sx = 1 + squash * 0.14;
+      const sy = 1 - squash * 0.14;
+      const glow = 0.16 + lift * 0.12;
+
+      // 柔和落影：椭圆径向渐变，拎起时更淡更远
+      ctx.save();
+      ctx.translate(pos.x, pos.y + h * 0.42 + 18 + lift * 12);
+      ctx.rotate(rot * 0.6);
+      ctx.scale(1, 0.42);
+      const shadow = ctx.createRadialGradient(0, 0, w * 0.05, 0, 0, w * 0.72);
+      shadow.addColorStop(0, `rgba(0,0,0,${0.46 - lift * 0.16})`);
+      shadow.addColorStop(0.55, `rgba(0,0,0,${0.22 - lift * 0.1})`);
+      shadow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadow;
+      ctx.beginPath();
+      ctx.arc(0, 0, w * 0.72, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(rot);
+      ctx.scale(sx, sy);
+
+      // 玻璃体（不垫深色底，保持真正半透明）
+      const glass = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+      glass.addColorStop(0, `rgba(255,255,255,${0.2 + lift * 0.05})`);
+      glass.addColorStop(0.38, 'rgba(255,255,255,0.095)');
+      glass.addColorStop(0.72, 'rgba(255,255,255,0.055)');
+      glass.addColorStop(1, 'rgba(255,255,255,0.04)');
+      roundRect(-w / 2, -h / 2, w, h, RADIUS);
+      ctx.fillStyle = glass;
+      ctx.fill();
+
+      ctx.save();
+      roundRect(-w / 2, -h / 2, w, h, RADIUS);
+      ctx.clip();
+
+      // 底部薄荷/蓝色折射
+      const mint = ctx.createRadialGradient(-w * 0.26, h * 0.5, 2, -w * 0.26, h * 0.5, w * 0.95);
+      mint.addColorStop(0, 'rgba(43,230,174,0.20)');
+      mint.addColorStop(0.5, 'rgba(72,200,255,0.07)');
+      mint.addColorStop(1, 'rgba(72,200,255,0)');
+      ctx.fillStyle = mint;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+
+      // 斜向高光
+      const sheen = ctx.createLinearGradient(-w / 2, -h / 2, w * 0.55, h * 0.55);
+      sheen.addColorStop(0, `rgba(255,255,255,${glow + 0.02})`);
+      sheen.addColorStop(0.32, 'rgba(255,255,255,0.03)');
+      sheen.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sheen;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+
+      // 左上角的一小块镜面高光
+      const spec = ctx.createRadialGradient(-w * 0.34, -h * 0.36, 2, -w * 0.34, -h * 0.36, w * 0.46);
+      spec.addColorStop(0, `rgba(255,255,255,${0.16 + lift * 0.06})`);
+      spec.addColorStop(0.45, 'rgba(255,255,255,0.03)');
+      spec.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = spec;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+
+      ctx.restore();
+
+      // 外描边（带一点薄荷辉光）+ 内描边
+      ctx.save();
+      ctx.shadowColor = `rgba(43,230,174,${0.28 + lift * 0.18})`;
+      ctx.shadowBlur = 14;
+      roundRect(-w / 2, -h / 2, w, h, RADIUS);
+      ctx.strokeStyle = `rgba(226,255,246,${0.34 + lift * 0.1})`;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+      ctx.restore();
+
+      roundRect(-w / 2 + 1.2, -h / 2 + 1.2, w - 2.4, h - 2.4, RADIUS - 1);
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.stroke();
+
+      drawContent(w, h);
+      ctx.restore();
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, W, H);
+      drawStraps();
+      drawCard();
+    }
+
+    /* ── 循环 ── */
+    function loop(now) {
+      const dt = Math.min(0.032, (now - prev) / 1000) || 0.016;
+      prev = now;
+      time += dt;
+      step(dt);
+      render();
+      raf = requestAnimationFrame(loop);
+    }
+
+    function startLoop() {
+      if (raf || reduceMotion) return;
+      prev = performance.now();
+      raf = requestAnimationFrame(loop);
+    }
+
+    function stopLoop() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+
+    /* ── 交互 ── */
+    function localPoint(event) {
+      const rect = host.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    }
+
+    function overCard(p) {
+      const dx = p.x - pos.x;
+      const dy = p.y - pos.y;
+      const cos = Math.cos(-rot);
+      const sin = Math.sin(-rot);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      return Math.abs(lx) <= cw / 2 + 6 && Math.abs(ly) <= ch / 2 + 6;
+    }
+
+    host.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      const p = localPoint(event);
+      if (!overCard(p)) return;
+      event.preventDefault();
+      interacted = true;
+      dragging = true;
+      pointer.x = p.x;
+      pointer.y = p.y;
+      pointer.inside = true;
+      grab = { x: pos.x - p.x, y: pos.y - p.y };
+      host.setPointerCapture(event.pointerId);
+      host.style.cursor = 'grabbing';
+      if (reduceMotion) {
+        step(0.016);
+        render();
+      }
+    });
+
+    host.addEventListener('pointermove', (event) => {
+      const p = localPoint(event);
+      pointer.x = p.x;
+      pointer.y = p.y;
+      pointer.inside = true;
+      if (dragging) {
+        if (reduceMotion) {
+          const b = bounds();
+          pos.x = clamp(p.x + grab.x, b.minX, b.maxX);
+          pos.y = clamp(p.y + grab.y, b.minY, b.maxY);
+          render();
+        }
+        return;
+      }
+      host.style.cursor = overCard(p) ? 'grab' : 'default';
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      host.style.cursor = 'grab';
+      const max = 1800;
+      const sp = Math.hypot(vel.x, vel.y);
+      if (sp > max) {
+        vel.x = (vel.x / sp) * max;
+        vel.y = (vel.y / sp) * max;
+      }
+    }
+
+    host.addEventListener('pointerup', endDrag);
+    host.addEventListener('pointercancel', endDrag);
+    host.addEventListener('pointerleave', () => {
+      pointer.inside = false;
+      if (!dragging) host.style.cursor = 'default';
+    });
+
+    layout();
+    new ResizeObserver(() => {
+      layout();
+      render();
+    }).observe(host);
+
+    render();
+
+    if (reduceMotion) return;
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopLoop();
+      else if (visible) startLoop();
+    });
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        visible = entries[0].isIntersecting;
+        if (visible && !document.hidden) startLoop();
+        else stopLoop();
+      },
+      { threshold: 0 },
+    );
+    io.observe(host);
+
+    startLoop();
+  }
 
   /* ══════════════════ Ballpit：3D 物理球堆 ══════════════════ */
   function initBallpit(T, host) {
@@ -47,7 +533,7 @@ const start = () => {
       const r = 0.24 + Math.random() * 0.26;
       const mesh = new T.Mesh(
         sphere,
-        new T.MeshStandardMaterial({ color: PALETTE[i % PALETTE.length], roughness: 0.5, metalness: 0.02 })
+        new T.MeshStandardMaterial({ color: PALETTE[i % PALETTE.length], roughness: 0.5, metalness: 0.02 }),
       );
       mesh.scale.setScalar(r);
       mesh.position.set((Math.random() - 0.5) * 13, -4 + Math.random() * 10, -2.2 + Math.random() * 4.2);
@@ -71,17 +557,21 @@ const start = () => {
       renderer.setSize(w, h, false);
     }
 
-    window.addEventListener('pointermove', (event) => {
-      const rect = host.getBoundingClientRect();
-      const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const ny = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
-      mouse3.set(nx, ny, 0.5).unproject(camera);
-      const dir = mouse3.sub(camera.position).normalize();
-      const t = -camera.position.z / dir.z;
-      mouse.copy(camera.position).add(dir.multiplyScalar(t));
-    }, { passive: true });
+    window.addEventListener(
+      'pointermove',
+      (event) => {
+        const rect = host.getBoundingClientRect();
+        const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        const ny = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+        mouse3.set(nx, ny, 0.5).unproject(camera);
+        const dir = mouse3.sub(camera.position).normalize();
+        const t = -camera.position.z / dir.z;
+        mouse.copy(camera.position).add(dir.multiplyScalar(t));
+      },
+      { passive: true },
+    );
 
-    function step(dt) {
+    function stepPhysics(dt) {
       for (const b of balls) {
         const p = b.mesh.position;
         b.v.y += G * dt;
@@ -95,7 +585,6 @@ const start = () => {
         if (p.z > B.front - b.r) { p.z = B.front - b.r; b.v.z *= -0.5; }
         if (p.z < B.back + b.r) { p.z = B.back + b.r; b.v.z *= -0.5; }
 
-        // 鼠标推挤
         const dx = p.x - mouse.x;
         const dy = p.y - mouse.y;
         const dz = p.z - mouse.z;
@@ -109,12 +598,10 @@ const start = () => {
           b.v.z += (dz / d) * f * 0.5;
         }
 
-        // 轻微滚动感
         b.mesh.rotation.x += b.v.z * dt * 1.4;
         b.mesh.rotation.y += b.v.x * dt * 0.9;
       }
 
-      // 球-球碰撞
       for (let i = 0; i < balls.length; i++) {
         for (let j = i + 1; j < balls.length; j++) {
           const a = balls[i], b = balls[j];
@@ -140,7 +627,7 @@ const start = () => {
     function loop(now) {
       const dt = Math.min(0.033, (now - last) / 1000) || 0.016;
       last = now;
-      step(dt);
+      stepPhysics(dt);
       renderer.render(scene, camera);
       raf = requestAnimationFrame(loop);
     }
@@ -159,264 +646,26 @@ const start = () => {
     new ResizeObserver(resize).observe(host);
 
     if (reduceMotion) {
-      renderer.render(scene, camera); // 静态一帧
+      renderer.render(scene, camera);
       return;
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopLoop(); else if (visible) startLoop();
+      if (document.hidden) stopLoop();
+      else if (visible) startLoop();
     });
 
-    const io = new IntersectionObserver((entries) => {
-      visible = entries[0].isIntersecting;
-      if (visible && !document.hidden) startLoop(); else stopLoop();
-    }, { threshold: 0 });
+    const io = new IntersectionObserver(
+      (entries) => {
+        visible = entries[0].isIntersecting;
+        if (visible && !document.hidden) startLoop();
+        else stopLoop();
+      },
+      { threshold: 0 },
+    );
     io.observe(host);
 
     startLoop();
-  }
-
-  /* ══════════════════ Lanyard：绳索吊牌 ══════════════════ */
-  function initLanyard(T, host) {
-    const scene = new T.Scene();
-    const camera = new T.PerspectiveCamera(36, 1, 0.1, 100);
-    camera.position.set(0, 0.55, 7.6);
-
-    const renderer = new T.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = T.SRGBColorSpace;
-    host.appendChild(renderer.domElement);
-
-    scene.add(new T.AmbientLight(0xffffff, 1.05));
-    const key = new T.DirectionalLight(0xffffff, 1.25);
-    key.position.set(4, 7, 9);
-    scene.add(key);
-    const fill = new T.DirectionalLight(0xd8e9df, 0.55);
-    fill.position.set(-7, 2, 5);
-    scene.add(fill);
-
-    // 卡面纹理
-    const tex = makeCardTexture(T);
-    const card = new T.Mesh(
-      new T.PlaneGeometry(2.92, 1.85),
-      new T.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.6, metalness: 0.02, side: T.DoubleSide })
-    );
-    scene.add(card);
-
-    // 绳带
-    const ropeMat = new T.LineBasicMaterial({ color: 0x4f9b7e, transparent: true, opacity: 0.85 });
-    const ropes = [0, 1].map(() => {
-      const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]), ropeMat);
-      scene.add(line);
-      return line;
-    });
-
-    const pivot = { x: 0, y: 3.85 };
-    const L = 3.5;
-    let theta = 0.04;
-    let omega = 0.08;
-    let dragging = false;
-    let lastAngle = theta;
-    let prev = performance.now();
-    let raf = 0;
-
-    function resize() {
-      const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h, false);
-    }
-
-    function cardPoint() {
-      return {
-        x: pivot.x + Math.sin(theta) * L,
-        y: pivot.y - Math.cos(theta) * L
-      };
-    }
-
-    function updateVisual() {
-      const c = cardPoint();
-      card.position.set(c.x, c.y, 0);
-      card.rotation.z = -theta * 0.85;
-      const cos = Math.cos(-theta * 0.85), sin = Math.sin(-theta * 0.85);
-      const hh = 0.9;
-      const anchors = [-1.02, 1.02];
-      ropes.forEach((line, i) => {
-        const ax = anchors[i];
-        const dx = ax * cos - hh * sin;
-        const dy = ax * sin + hh * cos;
-        const from = new T.Vector3(pivot.x + ax, pivot.y + 0.55, -0.02);
-        const to = new T.Vector3(c.x + dx, c.y + dy, 0);
-        const mid = from.clone().add(to).multiplyScalar(0.5);
-        mid.y -= 0.16;
-        const curve = new T.QuadraticBezierCurve3(from, mid, to);
-        line.geometry.setFromPoints(curve.getPoints(16));
-      });
-    }
-
-    function loop(now) {
-      const dt = Math.min(0.033, (now - prev) / 1000) || 0.016;
-      prev = now;
-      if (!dragging) {
-        const g = 9.2;
-        const breeze = Math.sin(now * 0.0006) * 0.03;
-        omega += (-(g / L) * Math.sin(theta) - omega * 2.0 + breeze) * dt;
-        theta += omega * dt;
-      }
-      updateVisual();
-      renderer.render(scene, camera);
-      raf = requestAnimationFrame(loop);
-    }
-
-    // 拖拽交互
-    function toWorld(event) {
-      const rect = host.getBoundingClientRect();
-      const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const ny = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
-      const v = new T.Vector3(nx, ny, 0.5).unproject(camera);
-      const dir = v.sub(camera.position).normalize();
-      const t = -camera.position.z / dir.z;
-      return camera.position.clone().add(dir.multiplyScalar(t));
-    }
-
-    host.addEventListener('pointerdown', (event) => {
-      const w = toWorld(event);
-      const c = cardPoint();
-      if (Math.abs(w.x - c.x) < 1.55 && Math.abs(w.y - c.y) < 1.05) {
-        dragging = true;
-        host.setPointerCapture(event.pointerId);
-        lastAngle = theta;
-      }
-    });
-    host.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
-      const w = toWorld(event);
-      const next = Math.atan2(w.x - pivot.x, pivot.y - w.y);
-      theta = Math.max(-0.78, Math.min(0.78, next));
-      omega = (theta - lastAngle) * 26;
-      lastAngle = theta;
-    });
-    const endDrag = () => { dragging = false; };
-    host.addEventListener('pointerup', endDrag);
-    host.addEventListener('pointercancel', endDrag);
-
-    resize();
-    new ResizeObserver(resize).observe(host);
-    updateVisual();
-    renderer.render(scene, camera);
-
-    if (reduceMotion) return; // 静态呈现
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
-      else if (!raf) { prev = performance.now(); raf = requestAnimationFrame(loop); }
-    });
-    raf = requestAnimationFrame(loop);
-  }
-
-  /* ── 卡面纹理（Canvas 绘制） ── */
-  function makeCardTexture(T) {
-    const W = 1024, H = 648;
-    const cv = document.createElement('canvas');
-    cv.width = W; cv.height = H;
-    const g = cv.getContext('2d');
-
-    const r = 44;
-    const rr = (x, y, w, h, rad) => {
-      g.beginPath();
-      g.moveTo(x + rad, y);
-      g.arcTo(x + w, y, x + w, y + h, rad);
-      g.arcTo(x + w, y + h, x, y + h, rad);
-      g.arcTo(x, y + h, x, y, rad);
-      g.arcTo(x, y, x + w, y, rad);
-      g.closePath();
-    };
-
-    // 卡体
-    rr(14, 14, W - 28, H - 28, r);
-    g.fillStyle = '#0b1118';
-    g.fill();
-
-    // 顶部绿色带
-    g.save();
-    rr(14, 14, W - 28, H - 28, r);
-    g.clip();
-    g.fillStyle = '#0f1a21';
-    g.fillRect(14, 14, W - 28, 132);
-    g.fillStyle = '#2be6ae';
-    g.fillRect(14, 142, W - 28, 4);
-
-    // 品牌标记
-    g.fillStyle = '#2be6ae';
-    g.fillRect(64, 58, 8, 34);
-    g.fillRect(80, 46, 8, 58);
-    g.fillRect(96, 54, 8, 42);
-    g.fillStyle = '#e9f2f0';
-    g.font = '600 34px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText('智学节律', 126, 90);
-    g.fillStyle = '#8fa3ad';
-    g.font = '400 20px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText('让计划跟得上现实', 126, 118);
-    g.restore();
-
-    // 正文
-    g.fillStyle = '#5d707a';
-    g.font = '400 20px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText('学习空间 · 成员卡', 64, 214);
-
-    g.fillStyle = '#e9f2f0';
-    g.font = '600 62px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText('林同学', 62, 300);
-
-    g.fillStyle = '#93a6b0';
-    g.font = '400 26px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText('考研 · 计算机科学', 64, 344);
-
-    // 三个小指标
-    const items = [['目标', '380 分'], ['阶段', '强化 · 第 6 周'], ['初试', '42 天']];
-    items.forEach((it, i) => {
-      const x = 64 + i * 210;
-      g.fillStyle = '#5d707a';
-      g.font = '400 18px "PingFang SC","Microsoft YaHei",sans-serif';
-      g.fillText(it[0], x, 424);
-      g.fillStyle = '#2be6ae';
-      g.font = '600 26px "PingFang SC","Microsoft YaHei",sans-serif';
-      g.fillText(it[1], x, 460);
-    });
-
-    // 分隔线 + 条码
-    g.strokeStyle = 'rgba(255,255,255,0.14)';
-    g.lineWidth = 2;
-    g.beginPath(); g.moveTo(64, 500); g.lineTo(W - 64, 500); g.stroke();
-
-    let bx = 64;
-    while (bx < 360) {
-      const w = 2 + Math.random() * 5;
-      g.fillStyle = '#93a6b0';
-      g.fillRect(bx, 528, w, 52);
-      bx += w + 4;
-    }
-    g.fillStyle = '#5d707a';
-    g.font = '400 18px "SF Mono",Consolas,monospace';
-    g.fillText('ZX-2027-1107 · VALID 07/2026 — 12/2026', 64, 612);
-
-    // 右上角挂孔
-    g.globalCompositeOperation = 'destination-out';
-    g.beginPath();
-    g.arc(W / 2, 44, 17, 0, Math.PI * 2);
-    g.fill();
-    g.globalCompositeOperation = 'source-over';
-    g.strokeStyle = 'rgba(255,255,255,0.22)';
-    g.lineWidth = 4;
-    g.beginPath();
-    g.arc(W / 2, 44, 19, 0, Math.PI * 2);
-    g.stroke();
-
-    const texture = new T.CanvasTexture(cv);
-    texture.colorSpace = T.SRGBColorSpace;
-    texture.anisotropy = 4;
-    return texture;
   }
 };
 

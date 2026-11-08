@@ -340,9 +340,9 @@
     }
     .final-cta-copy h2{font-size:clamp(22px,2.8vw,30px);margin:0 0 12px}
     .final-cta-copy p{color:var(--ink-2);margin:0 0 28px;font-size:14px}
-    .lanyard-stage{position:relative;height:380px;width:100%;max-width:330px;justify-self:center;touch-action:pan-y;cursor:grab}
+    .lanyard-stage{position:relative;height:380px;width:100%;max-width:330px;justify-self:center;touch-action:pan-y;cursor:grab;user-select:none;-webkit-user-select:none}
     .lanyard-stage:active{cursor:grabbing}
-    .lanyard-stage canvas{display:block;width:100%;height:100%}
+    .lanyard-stage canvas{display:block;width:100%;height:100%;-webkit-user-drag:none}
 
     .site-footer{
       border-top:1px solid var(--line);padding:22px 0 30px;
