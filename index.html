@@ -183,13 +183,23 @@
 
     .hero h1{font-size:clamp(34px,5.4vw,62px);line-height:1.16;margin:0 0 22px;letter-spacing:-.03em}
     .hero h1 em{
-      font-style:normal;display:inline-block;vertical-align:bottom;text-align:left;
-      background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+      font-style:normal;display:inline-grid;vertical-align:bottom;text-align:left;
       transition:width .55s var(--ease);
     }
-    .word-morph{display:inline-block;transition:opacity .45s ease,filter .45s ease,transform .45s ease}
-    .word-morph.is-swapping{opacity:0;filter:blur(7px);transform:translateY(.28em) scale(.96)}
-    .word-measure{position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none}
+    /* 渐变必须挂在会动的那一层：挂在父级 em 上时，子级的 opacity/transform 影响不到渐变像素，
+       视觉上就是"瞬间换词"，没有过渡。两层叠放做交叉淡入淡出，避免中间出现空白帧。 */
+    /* 两层与占位层叠在同一个网格单元里：位置由占位层决定，不会出现基线偏移 */
+    .word-morph{
+      grid-area:1/1;white-space:nowrap;
+      background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+      opacity:0;transform:translateY(.26em) scale(.995);filter:blur(6px);
+      transition:opacity .42s var(--ease),transform .42s var(--ease),filter .42s var(--ease);
+      will-change:opacity,transform,filter;
+    }
+    .word-morph.is-on{opacity:1;transform:none;filter:none;z-index:2}
+    .word-morph.is-out{opacity:0;transform:translateY(-.26em) scale(.995);filter:blur(6px)}
+    .word-morph.is-reset{transition:none;opacity:0;transform:translateY(.26em) scale(.995);filter:blur(6px)}
+    .word-sizer{grid-area:1/1;visibility:hidden;white-space:nowrap;pointer-events:none}
 
     .hero .lede{max-width:600px;margin:0 auto 38px;color:var(--ink-2);font-size:16px;line-height:1.8}
     .cta-row{display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap}
@@ -230,9 +240,14 @@
     .feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
     .feature-card{
       position:relative;background:var(--panel-bg);border:1px solid var(--line);
-      border-radius:var(--radius);padding:24px 20px;overflow:hidden;
+      border-radius:var(--radius);padding:24px 20px;
+      /* overflow:clip 比 hidden 轻：不会把卡片变成滚动容器，也少一层合成开销 */
+      overflow:hidden;overflow:clip;
       transition:border-color .22s var(--ease),transform .22s var(--ease),box-shadow .22s var(--ease);
-      backdrop-filter:blur(12px);
+      /* 不用 backdrop-filter：卡片背后只是渐变+网格，模糊没有视觉收益，
+         却会让每张卡在 GPU 上持续重算背景，圆角左缘出现 1px 接缝闪烁 */
+      isolation:isolate;
+      background-clip:padding-box;
     }
     .feature-card:hover{border-color:rgba(43,230,174,.38);box-shadow:0 20px 44px rgba(0,0,0,.28)}
     html[data-theme='light'] .feature-card{box-shadow:0 10px 28px rgba(15,32,40,.05)}
@@ -248,12 +263,12 @@
     .feature-card p{margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.72}
 
     /* TiltedCard 光斑 */
-    .tilt-card{position:relative;transform-style:preserve-3d;transition:transform .22s cubic-bezier(.22,.61,.36,1);will-change:transform}
-    .tilt-card.is-tilting{transition:transform .05s linear}
+    .tilt-card{position:relative;transform-style:preserve-3d;transition:transform .22s cubic-bezier(.22,.61,.36,1)}
+    .tilt-card.is-tilting{transition:transform .05s linear;will-change:transform}
     .tilt-glare{
       position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;z-index:3;
-      transition:opacity .28s ease;mix-blend-mode:soft-light;
-      background:radial-gradient(240px circle at var(--gx,50%) var(--gy,50%),rgba(255,255,255,.5),transparent 62%);
+      transition:opacity .28s ease;
+      background:radial-gradient(240px circle at var(--gx,50%) var(--gy,50%),rgba(255,255,255,.16),transparent 62%);
     }
     .tilt-card:hover .tilt-glare{opacity:1}
     .magnet-el{will-change:transform}
@@ -285,7 +300,7 @@
     .feedback .sub{text-align:center;color:var(--ink-2);margin:0 0 34px;font-size:14px}
     .feedback-form{
       background:var(--panel-bg);border:1px solid var(--line);border-radius:var(--radius);
-      padding:20px;display:grid;gap:12px;backdrop-filter:blur(12px);
+      padding:20px;display:grid;gap:12px;
     }
     .feedback-form input[type=text],.feedback-form textarea{
       width:100%;border:1px solid var(--line);border-radius:11px;
@@ -417,7 +432,7 @@
       </div>
       <div class="wrap">
         <span class="hero-badge"><span class="dot"></span>面向长期学习者的计划与复盘空间</span>
-        <h1>计划会变化，<br><em id="morph-word"><span class="word-morph" id="morph-word-text">节律</span></em>帮你回到正轨</h1>
+        <h1>计划会变化，<br><em id="morph-word"><span class="word-morph is-on" id="morph-word-text">节律</span><span class="word-morph" id="morph-word-next" aria-hidden="true"></span><span class="word-sizer" aria-hidden="true">节律</span></em>帮你回到正轨</h1>
         <p class="lede">智学节律把长期目标拆成每天可执行的三件事，用周视图留出弹性，用周报复盘告诉你时间去了哪里——让计划跟得上现实。</p>
         <div class="cta-row">
           <a class="btn-enter" href="app.html">进入 <span class="arrow">→</span></a>
@@ -646,21 +661,17 @@
       /* ── 标语关键词 Morph 轮换 ── */
       var WORDS = ["节律", "节奏", "路标"];
       var wordEl = document.getElementById("morph-word");
-      var textEl = document.getElementById("morph-word-text");
-      var measure = document.createElement("span");
-      measure.className = "word-measure";
-      var h1 = wordEl.closest("h1");
-      h1.appendChild(measure);
-      var idx = 0;
+      var layerA = document.getElementById("morph-word-text");
+      var layerB = document.getElementById("morph-word-next");
+      var sizer = wordEl.querySelector(".word-sizer");
+      var layers = [layerA, layerB];
+      var cur = 0;   // 当前显示的是哪一层
+      var idx = 0;   // 当前词下标
 
+      /* 宽度用不可见占位层量：它和两层同字体同字号，量出来就是真实排版宽度 */
       function fitWidth(word){
-        var cs = getComputedStyle(wordEl);
-        measure.style.fontWeight = cs.fontWeight;
-        measure.style.fontSize = cs.fontSize;
-        measure.style.fontFamily = cs.fontFamily;
-        measure.style.letterSpacing = cs.letterSpacing;
-        measure.textContent = word;
-        wordEl.style.width = measure.getBoundingClientRect().width + "px";
+        sizer.textContent = word;
+        wordEl.style.width = sizer.getBoundingClientRect().width + "px";
       }
       fitWidth(WORDS[0]);
 
@@ -682,19 +693,44 @@
         fitOrbits();
       });
 
+      /* 交叉淡入淡出：旧词上浮模糊淡出，新词同时从下方浮入，两段动画重叠，
+         不会出现"先空白再出现"的中断感。 */
+      function swapWord(){
+        var outLayer = layers[cur];
+        var inLayer = layers[1 - cur];
+        idx = (idx + 1) % WORDS.length;
+
+        inLayer.textContent = WORDS[idx];
+        inLayer.className = "word-morph is-reset";   // 瞬时归位到"下方、不可见"
+        void inLayer.offsetWidth;                     // 提交这一帧，避免从旧位置补间
+        inLayer.className = "word-morph is-on";       // 过渡到可见
+        outLayer.className = "word-morph is-out";     // 过渡到上方淡出
+
+        fitWidth(WORDS[idx]);                         // 容器宽度同步过渡，尾部文字平滑跟随
+        cur = 1 - cur;
+      }
+
       if(!reduced){
         setInterval(function(){
-          textEl.classList.add("is-swapping");
-          setTimeout(function(){
-            idx = (idx + 1) % WORDS.length;
-            fitWidth(WORDS[idx]);
-            textEl.textContent = WORDS[idx];
-            textEl.classList.remove("is-swapping");
-          }, 460);
+          if(document.visibilityState === "visible") swapWord();
         }, 3400);
       }
 
+      /* 轨道星点：滚动出首屏或标签页隐藏时不再逐帧写样式。
+         否则即使看不见，也在持续触发整页重绘，卡片 1px 边框容易出现接缝闪烁。 */
+      var heroEl = document.querySelector(".hero");
+      var heroVisible = true;
+      if("IntersectionObserver" in window && heroEl){
+        new IntersectionObserver(function(entries){
+          heroVisible = entries[0].isIntersecting;
+        }, {threshold: 0}).observe(heroEl);
+      }
+
       function tick(now){
+        if(!heroVisible || document.hidden){
+          requestAnimationFrame(tick);
+          return;
+        }
         var t = now / 1000;
         var bw = bg.clientWidth;
         var bh = bg.clientHeight;
