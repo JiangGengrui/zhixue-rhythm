@@ -2,7 +2,7 @@
 
 真实账号 + 真实数据 + 真实计算的学习计划产品。目标 → 计划项 → 周排程 → 今日执行 → 周报复盘，全链路无写死数字。
 
-**当前版本：v1.2.1** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 `../../01_选题与方案/智学节律 产品需求文档.docx`（V2.0，第十八章为实现与迭代记录）
+**当前版本：v1.2.1** · 迭代记录见 [CHANGELOG.md](./CHANGELOG.md) · 产品文档见 [docs/product/](./docs/product/)（PRD V2.0，第十八章为实现与迭代记录）
 
 ## 版本历史
 
@@ -104,6 +104,7 @@ scripts/shot.mjs          通用截图（支持浅色主题与整页）
 public/three-effects.js  主页 3D 吊牌（three.js 动态加载）
 index.html        产品主页（营销页，多页构建入口之一）
 app.html          学习空间（React 应用）
+docs/product/      PRD（V2.0）/ 技术架构设计 / 实施规划
 docs/openapi.yaml  API 契约
 docs/操作手册.md    启动、备份、回滚、排障
 docs/拆解与重排接入说明.md  给前端/UI 的接口与呈现约定
