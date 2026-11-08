@@ -4,7 +4,7 @@ dist/
 *.local
 .DS_Store
 npm-debug.log*
-data/
+/data/
 artifacts/
 server/engine.generated.mjs
 backups/
