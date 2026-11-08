@@ -252,6 +252,8 @@ async function main() {
   await cdp.shot('03-goal');
   console.log('✓ 目标与计划项写入成功');
 
+
+
   // 3b. 智能拆解：生成草案 → 阶段与裁断结果可见（不采纳，避免覆盖示例数据）
   await cdp.click('生成草案');
   await sleep(1500);
@@ -355,6 +357,22 @@ async function main() {
   assert(!body.includes('NaN'), '周报出现 NaN');
   await cdp.shot('06-report');
   console.log('✓ 周报按真实记录计算');
+  // 3a. 通知中心：预警落库 → 铃铛未读 → 打开面板 → 全部已读
+  await cdp.eval(`return document.querySelector('[aria-label="通知中心"]')?.click(); true;`);
+  await sleep(1200);
+  body = await cdp.text();
+  assert(body.includes('通知中心'), '通知面板未打开');
+  assert(body.includes('紧急') || body.includes('提醒'), '面板内没有预警内容');
+  const unreadBefore = await cdp.eval(`return document.querySelector('.notif-dot')?.textContent ?? '0';`);
+  await cdp.click('全部已读');
+  await sleep(800);
+  const unreadAfter = await cdp.eval(`return document.querySelector('.notif-dot')?.textContent ?? '0';`);
+  assert(unreadBefore !== '0', '打开面板前应有未读角标');
+  assert(unreadAfter === '0', '全部已读后角标应消失');
+  await cdp.eval(`return document.querySelector('[aria-label="通知中心"]')?.click(); true;`);
+  await sleep(500);
+  await cdp.shot('03c-notifications');
+  console.log('✓ 通知中心：预警生成与已读闭环正常');
 
   // 6b. 离线打卡：断网仍可操作，恢复网络后补传
   await cdp.click('今日');
@@ -373,10 +391,10 @@ async function main() {
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
   });
-  await cdp.click('重试');
-  await sleep(1500);
+  // 恢复联网会触发 online 事件自动补传；不点重试按钮，验证的就是自动补传本身
+  await sleep(2500);
   body = await cdp.text();
-  assert(!body.includes('项待同步'), '恢复网络后队列未清空');
+  assert(!body.includes('项待同步'), '恢复网络后队列未自动清空');
   console.log('✓ 恢复网络后自动补传');
 
   // 7. 刷新后数据仍在（服务端持久化）

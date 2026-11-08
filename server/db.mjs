@@ -100,6 +100,19 @@ function migrate(db) {
       option_key TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    -- 站内通知：进度预警 / 挽救信号 / 周报生成等
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info',
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      read_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at DESC);
   `);
 
   // 增量迁移：任务剩余工时（老库补列，默认取预估工时）

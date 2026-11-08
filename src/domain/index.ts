@@ -2,6 +2,7 @@
 export * from './types';
 export * from './date';
 export * from './engine';
+export * from './alerts';
 export * from './templates';
 export * from './decompose';
 export * from './replan';

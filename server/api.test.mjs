@@ -327,6 +327,33 @@ test('撤销完成：剩余工时按完成度退还', async () => {
   assert.equal(reverted.progressPct, undefined);
 });
 
+test('通知中心：预警生成、同日去重、全部已读', async () => {
+  const { cookie } = await register('notify@test.dev');
+  // deadline 3 天后 + 大量剩余需求 → deadline-risk danger
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-11-11', weeklyMinutes: 300, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 1200, weight: 5 }, cookie);
+
+  const first = await call('GET', '/api/notifications', null, cookie);
+  assert.equal(first.status, 200);
+  assert.ok(first.json.unread > 0, '应有未读预警');
+  assert.ok(first.json.items.some((n) => n.kind === 'deadline-risk' && n.level === 'danger'));
+
+  // 同一天再拉：不重复落库
+  const second = await call('GET', '/api/notifications', null, cookie);
+  assert.equal(second.json.items.length, first.json.items.length);
+
+  // 全部已读
+  const read = await call('POST', '/api/notifications/read', { ids: 'all' }, cookie);
+  assert.equal(read.status, 200);
+  const third = await call('GET', '/api/notifications', null, cookie);
+  assert.equal(third.json.unread, 0);
+  assert.ok(third.json.items.every((n) => n.read));
+
+  // 未登录不可访问
+  const anon = await call('GET', '/api/notifications');
+  assert.equal(anon.status, 401);
+});
+
 test('导出：JSON 完整快照与 CSV 任务记录', async () => {
   const { cookie } = await register('export@test.dev');
   await call('PUT', '/api/goal', { title: '导出目标', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);

@@ -52,6 +52,8 @@ export interface Actions {
   deleteAccount: (password: string) => Promise<void>;
   flushOps: () => Promise<void>;
   pauseBlock: (id: string) => Promise<void>;
+  loadNotifications: () => Promise<void>;
+  markNotificationsRead: () => Promise<void>;
   resumeBlock: (id: string) => Promise<void>;
   moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
@@ -72,6 +74,24 @@ export function useAppState() {
   const [error, setError] = useState<string | null>(null);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [pendingOps, setPendingOps] = useState<number>(() => loadOps().length);
+  const [notifs, setNotifs] = useState<{ items: Array<{ id: number; kind: string; level: 'info' | 'warn' | 'danger'; title: string; body: string; createdAt: string; read: boolean }>; unread: number }>({ items: [], unread: 0 });
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      setNotifs(await api.notifications());
+    } catch {
+      /* 通知拉取失败不打扰主流程 */
+    }
+  }, []);
+
+  const markNotificationsRead = useCallback(async () => {
+    try {
+      await api.markNotificationsRead('all');
+      setNotifs((prev) => ({ items: prev.items.map((n) => ({ ...n, read: true })), unread: 0 }));
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -85,6 +105,7 @@ export function useAppState() {
       });
       setPhase('ready');
       setError(null);
+      void loadNotifications();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setPhase('guest');
@@ -473,10 +494,11 @@ export function useAppState() {
     state,
     recoveryCode,
     pendingOps,
+    notifs,
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
-      pauseBlock, resumeBlock, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan,
+      pauseBlock, resumeBlock, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan, loadNotifications, markNotificationsRead,
     } satisfies Actions,
   };
 }

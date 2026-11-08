@@ -3,7 +3,7 @@ import {
   newId, sessionCookie, clearCookie, verifyPassword, verifyRecoveryCode,
 } from './auth.mjs';
 import { nowISO } from './db.mjs';
-import { buildReport, decomposeGoal, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
+import { buildReport, decomposeGoal, evaluateAlerts, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SUBJECTS = new Set(['math', 'major', 'english', 'politics', 'other']);
@@ -133,6 +133,13 @@ export function createApi(db) {
     skipWithSource: db.prepare("UPDATE blocks SET status='skipped', skip_reason=?, source=?, updated_at=? WHERE id=? AND user_id=?"),
     revertBlock: db.prepare("UPDATE blocks SET status='pending', actual_min=NULL, skip_reason=NULL, progress_pct=NULL, source=NULL, started_at=NULL, accumulated_sec=0, updated_at=? WHERE id=? AND user_id=?"),
     refundWork: db.prepare('UPDATE items SET remaining_min = COALESCE(remaining_min, estimate_min) + ? WHERE id = ? AND user_id = ?'),
+    insertNotif: db.prepare('INSERT INTO notifications (user_id, kind, level, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+    notifToday: db.prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND kind = ? AND substr(created_at, 1, 10) = ?"),
+    recentNotifs: db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 30'),
+    unreadCount: db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read_at IS NULL'),
+    markAllRead: db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL"),
+    markRead: db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?'),
+    notifById: db.prepare('SELECT * FROM notifications WHERE id = ? AND user_id = ?'),
     deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done'"),
     clearItems: db.prepare('DELETE FROM items WHERE user_id = ?'),
     clearBlocks: db.prepare('DELETE FROM blocks WHERE user_id = ?'),
@@ -236,6 +243,48 @@ export function createApi(db) {
     },
 
     'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+
+    // 站内通知：拉取时先跑一遍预警规则（同类别同日只落一条），再返回列表与未读数
+    'GET /api/notifications': ({ user }) => {
+      const today = todayISO();
+      if (q.goalByUser.get(user.id)) {
+        const state = stateOf(user);
+        const alerts = evaluateAlerts({
+          goal: q.goalByUser.get(user.id),
+          items: state.items,
+          blocks: state.blocks,
+          settings: state.settings,
+          today,
+        });
+        for (const a of alerts) {
+          const exists = q.notifToday.get(user.id, a.kind, today).c;
+          if (!exists) q.insertNotif.run(user.id, a.kind, a.level, a.title, a.body, nowISO());
+        }
+      }
+      const items = q.recentNotifs.all(user.id).map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        level: row.level,
+        title: row.title,
+        body: row.body,
+        createdAt: row.created_at,
+        read: row.read_at != null,
+      }));
+      return { items, unread: q.unreadCount.get(user.id).c };
+    },
+
+    'POST /api/notifications/read': ({ user, body }) => {
+      const now = nowISO();
+      if (body?.ids === 'all') {
+        q.markAllRead.run(now, user.id);
+        return { ok: true };
+      }
+      const ids = Array.isArray(body?.ids) ? body.ids.map((v) => Number(v)).filter(Number.isInteger) : [];
+      for (const id of ids) {
+        if (q.notifById.get(id, user.id)) q.markRead.run(now, id, user.id);
+      }
+      return { ok: true, count: ids.length };
+    },
 
     'GET /api/decompose/templates': () => ({ templates: TEMPLATE_LIST }),
 

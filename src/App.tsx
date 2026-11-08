@@ -101,6 +101,71 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+function IconBell() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
+}
+
+function NotificationBell({
+  notifs,
+  onRefresh,
+  onReadAll,
+}: {
+  notifs: { items: Array<{ id: number; kind: string; level: string; title: string; body: string; createdAt: string; read: boolean }>; unread: number };
+  onRefresh: () => void;
+  onReadAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next) onRefresh();
+  }
+
+  return (
+    <div className="notif-wrap">
+      <button type="button" className="btn btn-icon btn-quiet" onClick={toggle} aria-label="通知中心" title="通知中心">
+        <IconBell />
+        {notifs.unread > 0 && <span className="notif-dot">{notifs.unread > 9 ? '9+' : notifs.unread}</span>}
+      </button>
+
+      {open && (
+        <div className="notif-panel" role="dialog" aria-label="通知中心">
+          <div className="notif-head">
+            <b>通知中心</b>
+            {notifs.items.length > 0 && (
+              <button type="button" className="notif-mark" onClick={onReadAll}>
+                全部已读
+              </button>
+            )}
+          </div>
+          {notifs.items.length === 0 ? (
+            <p className="notif-empty">暂无通知。进度落后、临近超载或连续中断时，预警会出现在这里。</p>
+          ) : (
+            <ul className="notif-list">
+              {notifs.items.map((n) => (
+                <li key={n.id} className={`notif-item lv-${n.level} ${n.read ? 'is-read' : 'is-unread'}`}>
+                  <span className="notif-level">{n.level === 'danger' ? '紧急' : n.level === 'warn' ? '提醒' : '通知'}</span>
+                  <div className="notif-body">
+                    <b>{n.title}</b>
+                    <p>{n.body}</p>
+                    <time>{n.createdAt.slice(5, 16).replace('T', ' ')}</time>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -132,7 +197,14 @@ function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }
 }
 
 export default function App() {
-  const { phase, error, state, actions, recoveryCode, pendingOps } = useAppState();
+  const { phase, error, state, actions, recoveryCode, pendingOps, notifs } = useAppState();
+
+  // 通知轮询：登录态下每 60 秒刷新一次预警
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const timer = window.setInterval(() => void actions.loadNotifications(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [phase, actions]);
   const { theme, toggle } = useTheme();
   const [tab, setTab] = useState<Tab>(() => {
     const h = location.hash.slice(1);
@@ -278,6 +350,11 @@ export default function App() {
           <ThemeToggle theme={theme} onToggle={toggle} />
 
           <div className="row" style={{ gap: 8 }}>
+            <NotificationBell
+              notifs={notifs}
+              onRefresh={() => void actions.loadNotifications()}
+              onReadAll={() => void actions.markNotificationsRead()}
+            />
             <button type="button" className="rail-user" onClick={() => go('settings')}>
               <span className="avatar">{initial}</span>
               <div>
@@ -323,6 +400,7 @@ export default function App() {
               离线 {pendingOps}
             </button>
           )}
+          <NotificationBell notifs={notifs} onRefresh={() => void actions.loadNotifications()} onReadAll={() => void actions.markNotificationsRead()} />
           <ThemeToggle theme={theme} onToggle={toggle} />
         </header>
 

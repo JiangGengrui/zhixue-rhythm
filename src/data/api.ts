@@ -112,6 +112,13 @@ export const api = {
     request<{ item: PlanItem }>('POST', '/api/items', item),
   deleteItem: (id: string) => request<{ ok: true }>('DELETE', `/api/items/${id}`),
   exportUrl: (format: 'json' | 'csv') => `/api/export?format=${format}`,
+  notifications: () =>
+    request<{
+      items: Array<{ id: number; kind: string; level: 'info' | 'warn' | 'danger'; title: string; body: string; createdAt: string; read: boolean }>;
+      unread: number;
+    }>('GET', '/api/notifications'),
+  markNotificationsRead: (ids: 'all' | number[]) =>
+    request<{ ok: true }>('POST', '/api/notifications/read', { ids }),
   deleteAccount: (password: string) => request<{ ok: true }>('DELETE', '/api/account', { password }),
   putSettings: (settings: Settings) =>
     request<{ settings: Settings }>('PUT', '/api/settings', settings),
