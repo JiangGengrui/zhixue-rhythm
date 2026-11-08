@@ -324,3 +324,9 @@ p { margin: 0; }
   border-radius: 14px; padding: 12px 16px; font-size: 12.5px;
 }
 .hint-bar span { flex: 1; min-width: 220px; line-height: 1.6; }
+
+/* ── 卡片内的排程结果提示 ── */
+p.notice { margin: 6px 0 0; display: block; }
+@media (max-width: 760px) {
+  .top-actions .hint { display: none; }
+}

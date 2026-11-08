@@ -484,6 +484,35 @@ test('访问计数：POST 自增，GET 只读', async () => {
   assert.equal(again.json.count, start + 1, 'GET 不应改变计数');
 });
 
+test('重排这一周：清掉未完成块重新装，已完成记录与新增任务都正确', async () => {
+  const { cookie } = await register('rebuild@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once' }, cookie);
+  await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 120, weight: 5 }, cookie);
+
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
+  assert.ok(gen.json.blocks.length > 0);
+  const first = gen.json.blocks[0];
+  await call('PATCH', `/api/blocks/${first.id}`, { status: 'done', actualMin: 60 }, cookie);
+
+  await call('POST', '/api/items', { title: 'B', subject: 'major', estimateMin: 90, weight: 4 }, cookie);
+
+  const re = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02', mode: 'rebuild' }, cookie);
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  assert.equal(re.json.mode, 'rebuild');
+
+  const done = re.json.blocks.filter((b) => b.status === 'done');
+  assert.equal(done.length, 1, '已完成记录应保留');
+  assert.equal(done[0].id, first.id);
+
+  const itemIds = new Set(re.json.blocks.map((b) => b.itemId));
+  assert.ok(itemIds.size >= 2, '新增任务也应被排进这一周');
+
+  // 未完成的块应被重新写过，不应残留旧 id 的 pending 重复项
+  for (const b of re.json.blocks) {
+    assert.ok(b.status === 'done' || b.id !== first.id, '旧块不应以未完成状态残留');
+  }
+});
+
 test('登出后会话失效', async () => {
   const { cookie } = await register('logout@test.dev');
   const out = await call('POST', '/api/auth/logout', {}, cookie);

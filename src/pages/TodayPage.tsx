@@ -11,6 +11,8 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
   const today = todayISO();
   const [editing, setEditing] = useState<string | null>(null);
   const [minutes, setMinutes] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const itemMap = useMemo(() => new Map(state.items.map((i) => [i.id, i])), [state.items]);
   const blocks = useMemo(
@@ -37,6 +39,26 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
         .slice(0, 6),
     [state.blocks, today, weekSet],
   );
+
+  const weekBlockCount = state.blocks.filter((b) => weekSet.has(b.date)).length;
+
+  /** 今日页的排程入口：必须给出结果反馈，否则用户会以为按钮坏了 */
+  async function generate() {
+    setBusy(true);
+    setNotice('正在排程…');
+    try {
+      const added = await actions.generateWeek(weekStart, 'fill');
+      setNotice(
+        added > 0
+          ? `已排入 ${added} 个任务块${blocks.length === 0 ? '（今天没有可用时段，已排到本周其它日子）' : ''}`
+          : '没有可排的任务：本周从今天起可能已无可用时段，或任务都已排过，可到「周视图」重排',
+      );
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '排程失败，请稍后重试');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const done = blocks.filter((b) => b.status === 'done');
   const plannedMin = blocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
@@ -159,11 +181,8 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
         title={today}
         desc={`${WEEKDAY_LABEL[weekdayOf(today)]} · 今天 ${blocks.length} 项`}
         action={
-          <Button
-            onClick={() => void actions.generateWeek(startOfWeek(today, state.settings.weekStart))}
-            variant="quiet"
-          >
-            生成本周计划
+          <Button variant="quiet" disabled={busy} onClick={() => void generate()}>
+            {busy ? '排程中…' : '生成本周计划'}
           </Button>
         }
       >
@@ -172,6 +191,7 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
           <Stat label="已完成" value={String(done.length)} unit={`/ ${blocks.length}`} />
           <Stat label="实际投入" value={(effectiveMin / 60).toFixed(1)} unit="小时" />
         </div>
+        {notice && <p className="notice">{notice}</p>}
         <div className="meter-row">
           <span>进度</span>
           <Meter value={done.length} max={Math.max(1, blocks.length)} />
@@ -185,13 +205,14 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
         {blocks.length === 0 ? (
           <Empty
             title="今天没有安排"
-            desc="如果本周其他日子有未完成任务，可在下方补打卡；也可以重新生成计划。"
+            desc={
+              weekBlockCount > 0
+                ? `本周已排 ${weekBlockCount} 项，但今天（${WEEKDAY_LABEL[weekdayOf(today)]}）没有时段。到「周视图」可以调整或重排。`
+                : '如果本周其他日子有未完成任务，可在下方补打卡；也可以生成本周计划。'
+            }
             action={
-              <Button
-                variant="primary"
-                onClick={() => void actions.generateWeek(startOfWeek(today, state.settings.weekStart))}
-              >
-                生成本周计划
+              <Button variant="primary" disabled={busy} onClick={() => void generate()}>
+                {busy ? '排程中…' : '生成本周计划'}
               </Button>
             }
           />

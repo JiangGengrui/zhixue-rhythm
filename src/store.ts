@@ -39,7 +39,7 @@ export interface Actions {
   addItem: (item: Omit<PlanItem, 'id' | 'goalId'>) => Promise<void>;
   removeItem: (id: string) => Promise<void>;
   updateSettings: (settings: Settings) => Promise<void>;
-  generateWeek: (weekStartISO: string) => Promise<number>;
+  generateWeek: (weekStartISO: string, mode?: 'fill' | 'rebuild') => Promise<number>;
   setBlockStatus: (
     id: string,
     status: BlockStatus,
@@ -174,13 +174,13 @@ export function useAppState() {
     });
   }, [run]);
 
-  const generateWeek = useCallback(async (weekStartISO: string): Promise<number> => {
+  const generateWeek = useCallback(async (weekStartISO: string, mode: 'fill' | 'rebuild' = 'fill'): Promise<number> => {
     let added = 0;
     await run(async () => {
       const weekEnd = addDays(weekStartISO, 6);
       const today = todayISO();
       const from = today >= weekStartISO && today <= weekEnd ? today : weekStartISO;
-      const res = await api.generatePlan(weekStartISO, from);
+      const res = await api.generatePlan(weekStartISO, from, mode);
       added = res.added ?? res.blocks.length;
       const inWeek = weekDates(weekStartISO);
       setState((prev) => ({

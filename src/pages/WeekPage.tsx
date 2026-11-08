@@ -16,6 +16,9 @@ const toMinutes = (value: string) => {
 export function WeekPage({ state, actions }: { state: AppState; actions: Actions }) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(todayISO(), state.settings.weekStart));
   const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  // 用户点过「生成」后不再展示预览，避免删空后预览块又冒出来
+  const [everGenerated, setEverGenerated] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('19:00');
@@ -27,19 +30,30 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   );
   const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
+  // 预览按"剩余工时"算：已完成的部分不该再出现在预览里
+  const pendingItems = useMemo(
+    () =>
+      items
+        .filter((i) => (i.remainingMin ?? i.estimateMin) > 0)
+        .map((i) => ({ ...i, estimateMin: i.remainingMin ?? i.estimateMin })),
+    [items],
+  );
+
   const packed = useMemo(
-    () => packWeek(items, state.settings, weekStart),
-    [items, state.settings, weekStart],
+    () => packWeek(pendingItems, state.settings, weekStart),
+    [pendingItems, state.settings, weekStart],
   );
 
   const dates = weekDates(weekStart);
-  const saved = state.blocks.filter((b) => dates.includes(b.date));
-  const hasSaved = saved.length > 0;
-  const shown = hasSaved ? saved : packed.blocks;
-
-  const capacity = dates.reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0);
   const today = todayISO();
   const isCurrentWeek = weekStart === startOfWeek(today, state.settings.weekStart);
+  const saved = state.blocks.filter((b) => dates.includes(b.date));
+  const hasSaved = saved.length > 0;
+  // 预览只给「本周、还没生成过」用：翻到其它周时不再显示雷同的假课表
+  const previewable = isCurrentWeek && !hasSaved && !everGenerated;
+  const shown = previewable ? packed.blocks : saved;
+
+  const capacity = dates.reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0);
   // 今天及之后还能排多少分钟（非本周时视为整周可用）
   const remainingFromToday = isCurrentWeek
     ? dates.filter((d) => d >= today).reduce((s, d) => s + Math.max(0, state.settings.weekdays[weekdayOf(d)] ?? 0), 0)
@@ -48,6 +62,36 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const plannedMin = shown.reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const bufferMin = shown.filter((b) => b.isBuffer).reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const editing = saved.find((b) => b.id === editingId) ?? null;
+
+  /** 翻周时清掉上一周留下的提示与编辑面板，避免提示串周 */
+  function switchWeek(next: string) {
+    setWeekStart(next);
+    setNotice('');
+    setEditingId(null);
+    setEditError('');
+  }
+
+  /** 排程统一入口：fill 只补没有块的任务，rebuild 清掉未完成块后整周重排 */
+  async function runGenerate(mode: 'fill' | 'rebuild') {
+    if (mode === 'rebuild' && hasSaved && !confirm('重新安排这一周？已完成的任务块会保留，其余会重新分配时间。')) return;
+    setBusy(true);
+    setNotice(mode === 'rebuild' ? '正在重新排程…' : '正在排程…');
+    try {
+      const added = await actions.generateWeek(weekStart, mode);
+      setEverGenerated(true);
+      if (added > 0) {
+        setNotice(mode === 'rebuild' ? `已重排：排入 ${added} 个任务块` : `已补排 ${added} 个任务块`);
+      } else if (noRoomLeft && isCurrentWeek) {
+        setNotice('这一周从今天起已经排不出时间了，可用上方「为下周生成」');
+      } else {
+        setNotice('没有可排的任务：工时可能已排完，或都已排进这一周');
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '排程失败，请稍后重试');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (!state.goal || items.length === 0) {
     return (
@@ -70,16 +114,22 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
     <div className="stack">
       <Card
         title={`${weekStart} — ${addDays(weekStart, 6)}`}
-        desc={hasSaved ? `已完成 ${saved.filter((b) => b.status === 'done').length} 项` : '以下为预览，点击「生成本周计划」后写入'}
+        desc={
+          hasSaved
+            ? `已完成 ${saved.filter((b) => b.status === 'done').length} 项`
+            : previewable
+              ? '以下为预览，点击「生成本周计划」后写入'
+              : '这一周还没有排计划'
+        }
         action={
           <div className="row">
-            <Button onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="上一周">
+            <Button onClick={() => switchWeek(addDays(weekStart, -7))} aria-label="上一周">
               ‹
             </Button>
-            <Button variant="quiet" onClick={() => setWeekStart(startOfWeek(todayISO(), state.settings.weekStart))}>
+            <Button variant="quiet" onClick={() => switchWeek(startOfWeek(todayISO(), state.settings.weekStart))}>
               本周
             </Button>
-            <Button onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="下一周">
+            <Button onClick={() => switchWeek(addDays(weekStart, 7))} aria-label="下一周">
               ›
             </Button>
           </div>
@@ -103,20 +153,14 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           </span>
         </div>
         <div className="row">
-          <Button
-            variant="primary"
-            onClick={() => {
-              void actions.generateWeek(weekStart).then((added) =>
-                setNotice(
-                  added > 0
-                    ? `新增 ${added} 个任务块`
-                    : '这一周没有可排的时段，未新增任务（可在「设置」调整每日可用时间）',
-                ),
-              );
-            }}
-          >
-            {hasSaved ? '补排新任务' : '生成本周计划'}
+          <Button variant="primary" disabled={busy} onClick={() => void runGenerate(hasSaved ? 'rebuild' : 'fill')}>
+            {busy ? '排程中…' : hasSaved ? '重新排这一周' : '生成本周计划'}
           </Button>
+          {hasSaved && (
+            <Button variant="quiet" disabled={busy} onClick={() => void runGenerate('fill')}>
+              只补新任务
+            </Button>
+          )}
           {notice && <span className="notice">{notice}</span>}
         </div>
       </Card>
@@ -199,9 +243,18 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
         </Card>
       )}
 
+      {!hasSaved && !previewable && (
+        <div className="hint-bar">
+          <span>
+            {weekStart} — {addDays(weekStart, 6)} 这一周还没有排计划。点「生成本周计划」把待完成任务排进这一周的可用时段。
+          </span>
+        </div>
+      )}
+
       <div className="week-grid">
         {dates.map((date) => {
           const dayBlocks = shown.filter((b) => b.date === date);
+          const dayPlanned = dayBlocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
           const cap = Math.max(0, state.settings.weekdays[weekdayOf(date)] ?? 0);
           const isToday = date === todayISO();
           return (
@@ -209,7 +262,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
               <header>
                 <span>{WEEKDAY_LABEL[weekdayOf(date)]}</span>
                 <strong>{date.slice(8)}</strong>
-                <small>{cap === 0 ? '休息' : `${(cap / 60).toFixed(1)}h`}</small>
+                <small>{cap === 0 ? '休息' : `${(dayPlanned / 60).toFixed(1)} / ${(cap / 60).toFixed(1)}h`}</small>
               </header>
               <div className="day-body">
                 {dayBlocks.length === 0 ? (
@@ -269,11 +322,13 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
         <ul className="bullets">
           {hasSaved ? (
             <>
-              <li>本周已生成 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
-              <li>已完成或已调整的块不会被「补排新任务」覆盖。</li>
+              <li>这一周已排 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
+              <li>点「重新排这一周」会重排未完成的块，已完成记录保留。</li>
             </>
-          ) : (
+          ) : previewable ? (
             packed.suggestions.map((s) => <li key={s}>{s}</li>)
+          ) : (
+            <li>这一周还没有排计划，点「生成本周计划」把待完成任务排进来。</li>
           )}
           <li>超过单日容量的任务会自动拆分到多天，不丢工作量。</li>
         </ul>

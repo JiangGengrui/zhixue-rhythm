@@ -41,6 +41,11 @@ class Cdp {
         else resolve(msg.result);
         return;
       }
+      // 自动确认原生 confirm，否则无头浏览器会一直等弹窗
+      if (msg.method === 'Page.javascriptDialogOpening') {
+        this.ws.send(JSON.stringify({ id: ++this.id, method: 'Page.handleJavaScriptDialog', params: { accept: true } }));
+        return;
+      }
       if (msg.method === 'Runtime.exceptionThrown') {
         this.errors.push(msg.params.exceptionDetails?.text ?? 'exception');
       }
@@ -177,6 +182,19 @@ async function main() {
   assert(body.includes('还没有目标') || body.includes('载入示例数据'), '登录后未进入空状态引导');
   await cdp.shot('02-empty');
   console.log('✓ 注册 + 会话建立正常');
+
+  // 2b. 顶栏「设置目标」在每一页都可见，且能跳到目标页
+  await cdp.eval(`window.confirm = () => true; return true;`);
+  await cdp.click('今日');
+  await sleep(500);
+  body = await cdp.text();
+  assert(body.includes('设置目标'), '顶栏缺少「设置目标」按钮');
+  await cdp.click('设置目标');
+  await sleep(700);
+  body = await cdp.text();
+  assert(body.includes('每周可用') || body.includes('目标名称'), '「设置目标」未跳转到目标页');
+  await cdp.shot('02b-set-goal');
+  console.log('✓ 顶栏「设置目标」每页可见且可用');
 
   // 3. 载入示例数据 → 目标页显示真实 R 值
   await cdp.click('载入示例数据');
@@ -362,11 +380,54 @@ async function main() {
 
   await cdp.click('周视图');
   await sleep(600);
-  await cdp.click('补排新任务');
+  await cdp.click('重新排这一周');
   await sleep(1200);
   body = await cdp.text();
   assert(!body.includes('NaN'), '按新容量重新生成后出现 NaN');
   console.log('✓ 按新容量重新生成正常');
+
+  // 8b. 翻到下一周：未生成的周应为空状态，而不是复用同一份课表
+  await cdp.click('›');
+  await sleep(900);
+  let next = await cdp.eval(`
+    return {
+      slots: document.querySelectorAll('.slot').length,
+      hint: document.body.innerText.includes('这一周还没有排计划'),
+      label: [...document.querySelectorAll('button')].map((b) => b.textContent).includes('生成本周计划'),
+    };
+  `);
+  assert(next.slots === 0, '未生成的下一周不应显示任务块');
+  assert(next.hint, '未生成的下一周缺少引导提示');
+  await cdp.shot('08b-next-week-empty');
+  console.log('✓ 未生成的周显示空状态，不再复用同一份课表');
+
+  // 8c. 在下一周生成 → 删除任务块后当日「已排/可用」应即时减少
+  await cdp.click('生成本周计划');
+  await sleep(1800);
+  const before = await cdp.eval(`
+    return {
+      slots: document.querySelectorAll('.slot').length,
+      totals: [...document.querySelectorAll('.day header small')].map((el) => el.textContent).join('|'),
+    };
+  `);
+  assert(before.slots > 0, '下一周生成后仍没有任务块');
+
+  await cdp.click('调整');
+  await sleep(500);
+  await cdp.click('删除任务块');
+  await sleep(1500);
+  body = await cdp.text();
+  assert(body.includes('已删除'), '删除任务块后没有反馈');
+  const after = await cdp.eval(`
+    return {
+      slots: document.querySelectorAll('.slot').length,
+      totals: [...document.querySelectorAll('.day header small')].map((el) => el.textContent).join('|'),
+    };
+  `);
+  assert(after.slots === before.slots - 1, '删除后任务块数量未减少');
+  assert(after.totals !== before.totals, '删除任务块后当日合计没有变化');
+  await cdp.shot('08c-delete');
+  console.log('✓ 删除任务块后当日合计同步更新');
 
   // 9. 登出后回到登录页
   await cdp.click('退出');

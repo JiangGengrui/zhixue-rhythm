@@ -143,7 +143,7 @@ export default function App() {
           </span>
           <span>
             <strong>智学节律</strong>
-            <small>让计划跟得上现实 · v0.2</small>
+            <small>让计划跟得上现实 · v1.0.1</small>
           </span>
         </div>
 
@@ -162,6 +162,9 @@ export default function App() {
         </nav>
 
         <div className="top-actions">
+          <Button variant="primary" onClick={() => go('goal')}>
+            设置目标
+          </Button>
           {pendingOps > 0 && (
             <button type="button" className="offline-badge" onClick={() => void actions.flushOps()}>
               离线 {pendingOps} 项待同步 · 重试

@@ -122,6 +122,7 @@ export function createApi(db) {
     blocksByDate: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date = ?'),
     moveBlock: db.prepare('UPDATE blocks SET date = ?, start_min = ?, end_min = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     deleteBlock: db.prepare('DELETE FROM blocks WHERE id = ? AND user_id = ?'),
+    deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done'"),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     itemById: db.prepare('SELECT * FROM items WHERE id = ? AND user_id = ?'),
     deleteItem: db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?'),
@@ -379,8 +380,14 @@ export function createApi(db) {
       const weekEnd = addDays(weekStart, 6);
       const from = body.from ? dateStr(body.from, '排程起始日') : weekStart;
       assert(from >= weekStart && from <= weekEnd, 'E1021', '排程起始日必须落在本周');
+      const mode = body?.mode === 'rebuild' ? 'rebuild' : 'fill';
 
-      // 本周已有块原样保留（已完成记录不会被重排覆盖），只为没有块的任务补排
+      // rebuild：先清掉这一周未完成的块，再把剩余工作量重新装一遍（已完成的记录保留）
+      if (mode === 'rebuild') {
+        q.deletePendingWeek.run(user.id, weekStart, weekEnd);
+      }
+
+      // fill：本周已有块原样保留（已完成记录不会被重排覆盖），只为没有块的任务补排
       const existingWeek = q.blocksByWeek.all(user.id, weekStart, weekEnd);
       const existingItems = new Set(existingWeek.map((row) => row.item_id));
 
@@ -436,6 +443,7 @@ export function createApi(db) {
         plannedMin: allBlocks.reduce((sum, b) => sum + (b.endMin - b.startMin), 0),
         bufferMin: allBlocks.filter((b) => b.isBuffer).reduce((sum, b) => sum + (b.endMin - b.startMin), 0),
         added: packed.blocks.length,
+        mode,
         suggestions: packed.suggestions,
         overflow: packed.overflow.map((o) => ({
           title: o.item.title,
