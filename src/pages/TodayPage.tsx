@@ -1,13 +1,29 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, Empty, Meter, Stat } from '../components';
-import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
+import { Button, Empty, IconCheck, Meter, Panel, Ring, Stat } from '../components';
+import { addDays, daysBetween, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import { SUBJECT_LABEL } from '../domain/types';
 import type { Block } from '../domain/types';
 import type { AppState, Actions } from '../store';
 
 const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-export function TodayPage({ state, actions }: { state: AppState; actions: Actions }) {
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 6) return '夜深了';
+  if (h < 12) return '早上好';
+  if (h < 18) return '下午好';
+  return '晚上好';
+}
+
+export function TodayPage({
+  state,
+  actions,
+  onGoGoal,
+}: {
+  state: AppState;
+  actions: Actions;
+  onGoGoal: () => void;
+}) {
   const today = todayISO();
   const [editing, setEditing] = useState<string | null>(null);
   const [minutes, setMinutes] = useState(0);
@@ -35,7 +51,7 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
     () =>
       state.blocks
         .filter((b) => b.date !== today && weekSet.has(b.date) && b.status === 'done')
-        .sort((a, b) => (a.date === b.date ? b.startMin - a.startMin : a.date > b.date ? -1 : 1))
+        .sort((a, b) => (a.date === b.date ? a.startMin - b.startMin : a.date > b.date ? -1 : 1))
         .slice(0, 6),
     [state.blocks, today, weekSet],
   );
@@ -63,6 +79,7 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
   const done = blocks.filter((b) => b.status === 'done');
   const plannedMin = blocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const effectiveMin = done.reduce((s, b) => s + (b.actualMin ?? b.endMin - b.startMin), 0);
+  const leftDays = state.goal ? daysBetween(today, state.goal.deadline) : null;
 
   function startComplete(b: Block) {
     setEditing(b.id);
@@ -74,29 +91,37 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
     const planned = b.endMin - b.startMin;
     return (
       <li key={b.id} className={`task task-${b.status}`}>
-        <div className="task-time">
-          <strong>{fmtHM(b.startMin)}</strong>
-          <small>{showDate ? `${b.date.slice(5)} · ${fmtDuration(planned)}` : fmtDuration(planned)}</small>
+        <div className="t-time">
+          <b>{fmtHM(b.startMin)}</b>
+          <span>{showDate ? `${b.date.slice(5)} · ${fmtDuration(planned)}` : fmtDuration(planned)}</span>
         </div>
-        <div className="task-main">
-          <div className="task-title">
+        <div className="t-main">
+          <div className="t-title">
+            {b.status === 'done' && (
+              <span className="check">
+                <IconCheck />
+              </span>
+            )}
+            <span>{item?.title ?? '已删除的任务'}</span>
             {item && <span className={`tag tag-${item.subject}`}>{SUBJECT_LABEL[item.subject]}</span>}
-            <strong>{item?.title ?? '已删除的任务'}</strong>
             {b.isBuffer && <span className="tag tag-buffer">弹性位</span>}
           </div>
-          <div className="task-meta">
+          <div className="t-meta">
             <StatusText block={b} />
           </div>
         </div>
-        <div className="task-actions">
+        <div className="t-act">
           {b.status === 'pending' && (
             <>
-              <Button variant="primary" onClick={() => void actions.setBlockStatus(b.id, 'running')}>
+              <Button variant="primary" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'running')}>
                 开始
               </Button>
-              <Button onClick={() => startComplete(b)}>直接完成</Button>
+              <Button size="sm" onClick={() => startComplete(b)}>
+                直接完成
+              </Button>
               <Button
                 variant="quiet"
+                size="sm"
                 onClick={() => void actions.setBlockStatus(b.id, 'skipped', undefined, 'other')}
               >
                 跳过
@@ -105,11 +130,12 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
           )}
           {b.status === 'running' && (
             <>
-              <Button variant="primary" onClick={() => startComplete(b)}>
+              <Button variant="primary" size="sm" onClick={() => startComplete(b)}>
                 完成
               </Button>
               <Button
                 variant="quiet"
+                size="sm"
                 onClick={() => void actions.setBlockStatus(b.id, 'skipped', undefined, 'interrupt')}
               >
                 中断放弃
@@ -117,12 +143,12 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
             </>
           )}
           {b.status === 'done' && (
-            <Button variant="quiet" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
+            <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
               撤销
             </Button>
           )}
           {b.status === 'skipped' && (
-            <Button variant="quiet" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
+            <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
               恢复
             </Button>
           )}
@@ -142,6 +168,7 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
             </label>
             <Button
               variant="primary"
+              size="sm"
               onClick={() => {
                 const safe = Math.max(1, Math.round(minutes));
                 void actions.setBlockStatus(b.id, 'done', safe);
@@ -150,7 +177,7 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
             >
               确认完成
             </Button>
-            <Button variant="quiet" onClick={() => setEditing(null)}>
+            <Button variant="quiet" size="sm" onClick={() => setEditing(null)}>
               取消
             </Button>
           </div>
@@ -161,103 +188,207 @@ export function TodayPage({ state, actions }: { state: AppState; actions: Action
 
   if (!state.goal) {
     return (
-      <Card title="今日" desc="先建立目标，今天才有内容可执行。">
-        <Empty
-          title="还没有目标"
-          desc="载入示例数据可以立刻体验完整链路。"
-          action={
-            <Button variant="primary" onClick={() => void actions.seedDemo()}>
-              载入示例数据
-            </Button>
-          }
-        />
-      </Card>
+      <div className="page page-enter">
+        <header className="page-head">
+          <div>
+            <div className="eyebrow">{today} · {WEEKDAY_LABEL[weekdayOf(today)]}</div>
+            <h1>{greeting()}，{state.user?.name}</h1>
+            <p className="sub">先建立目标，今天才有内容可执行。</p>
+          </div>
+        </header>
+        <Panel title="今日" desc="还没有目标">
+          <Empty
+            title="还没有目标"
+            desc="载入示例数据可以立刻体验完整链路。"
+            action={
+              <div className="row">
+                <Button variant="primary" onClick={() => void actions.seedDemo()}>
+                  载入示例数据
+                </Button>
+                <Button onClick={onGoGoal}>去设置目标</Button>
+              </div>
+            }
+          />
+        </Panel>
+      </div>
     );
   }
 
   return (
-    <div className="stack">
-      <Card
-        title={today}
-        desc={`${WEEKDAY_LABEL[weekdayOf(today)]} · 今天 ${blocks.length} 项`}
-        action={
-          <Button variant="quiet" disabled={busy} onClick={() => void generate()}>
+    <div className="page page-enter">
+      <header className="page-head">
+        <div>
+          <div className="eyebrow">
+            <span className="live" />
+            {today} · {WEEKDAY_LABEL[weekdayOf(today)]}
+            {leftDays !== null && leftDays >= 0 ? ` · 距目标 ${leftDays} 天` : ''}
+          </div>
+          <h1>
+            {greeting()}，{state.user?.name}
+          </h1>
+          <p className="sub">
+            今天 <b>{blocks.length} 项</b> · 计划 <b>{(plannedMin / 60).toFixed(1)} 小时</b> · 已投入{' '}
+            <b>{(effectiveMin / 60).toFixed(1)} 小时</b>
+          </p>
+        </div>
+        <div className="head-actions">
+          <Button onClick={onGoGoal}>设置目标</Button>
+          <Button variant="primary" disabled={busy} onClick={() => void generate()}>
             {busy ? '排程中…' : '生成本周计划'}
           </Button>
-        }
-      >
-        <div className="stats">
-          <Stat label="今日计划" value={(plannedMin / 60).toFixed(1)} unit="小时" />
-          <Stat label="已完成" value={String(done.length)} unit={`/ ${blocks.length}`} />
-          <Stat label="实际投入" value={(effectiveMin / 60).toFixed(1)} unit="小时" />
         </div>
-        {notice && <p className="notice">{notice}</p>}
-        <div className="meter-row">
-          <span>进度</span>
-          <Meter value={done.length} max={Math.max(1, blocks.length)} />
-          <span className="muted">
-            {blocks.length === 0 ? '—' : `${Math.round((done.length / blocks.length) * 100)}%`}
-          </span>
+      </header>
+
+      {notice && <p className="notice">{notice}</p>}
+
+      <div className="grid-main">
+        <div className="col">
+          <section className="panel accent rise">
+            <div className="hero-row">
+              <Ring
+                value={done.length}
+                max={Math.max(1, blocks.length)}
+                label="今日进度"
+                size={132}
+              />
+              <div className="stat-row">
+                <Stat label="今日计划" value={(plannedMin / 60).toFixed(1)} unit="小时" note={`${blocks.length} 个任务块`} />
+                <Stat
+                  label="已完成"
+                  value={String(done.length)}
+                  unit={`/ ${blocks.length}`}
+                  note={done.length > 0 ? `完成 ${Math.round((done.length / Math.max(1, blocks.length)) * 100)}%` : '尚未开始'}
+                  tone="up"
+                />
+                <Stat label="实际投入" value={(effectiveMin / 60).toFixed(1)} unit="小时" note="按打卡记录累计" />
+              </div>
+            </div>
+          </section>
+
+          <Panel
+            title="今日执行"
+            desc="点「开始」进入执行，完成后填写实际用时"
+            action={<span className="pill tone-quiet">{blocks.length} 块</span>}
+          >
+            {blocks.length === 0 ? (
+              <Empty
+                title="今天没有安排"
+                desc={
+                  weekBlockCount > 0
+                    ? `本周已排 ${weekBlockCount} 项，但今天（${WEEKDAY_LABEL[weekdayOf(today)]}）没有时段。到「周视图」可以调整或重排。`
+                    : '如果本周其他日子有未完成任务，可在下方补打卡；也可以生成本周计划。'
+                }
+                action={
+                  <Button variant="primary" disabled={busy} onClick={() => void generate()}>
+                    {busy ? '排程中…' : '生成本周计划'}
+                  </Button>
+                }
+              />
+            ) : (
+              <ul className="task-list">{blocks.map((b) => renderTask(b))}</ul>
+            )}
+          </Panel>
         </div>
-      </Card>
 
-      <Card title="今天的任务" desc="点「开始」进入执行，完成后填写实际用时。">
-        {blocks.length === 0 ? (
-          <Empty
-            title="今天没有安排"
-            desc={
-              weekBlockCount > 0
-                ? `本周已排 ${weekBlockCount} 项，但今天（${WEEKDAY_LABEL[weekdayOf(today)]}）没有时段。到「周视图」可以调整或重排。`
-                : '如果本周其他日子有未完成任务，可在下方补打卡；也可以生成本周计划。'
-            }
-            action={
-              <Button variant="primary" disabled={busy} onClick={() => void generate()}>
-                {busy ? '排程中…' : '生成本周计划'}
-              </Button>
-            }
-          />
-        ) : (
-          <ul className="task-list">{blocks.map((b) => renderTask(b))}</ul>
-        )}
-      </Card>
+        <div className="col">
+          {backfill.length > 0 && (
+            <Panel
+              title="本周待完成"
+              desc="可直接在此补打卡"
+              action={<span className="pill tone-amber">{backfill.length}</span>}
+            >
+              {backfill.map((b) => {
+                const item = itemMap.get(b.itemId);
+                return (
+                  <div key={b.id} className="mini-row">
+                    {item && <span className={`tag tag-${item.subject}`}>{SUBJECT_LABEL[item.subject]}</span>}
+                    <b title={item?.title}>{item?.title ?? '已删除的任务'}</b>
+                    <time>{b.date.slice(5)}</time>
+                    <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'done')}>
+                      补录
+                    </Button>
+                  </div>
+                );
+              })}
+            </Panel>
+          )}
 
-      {backfill.length > 0 && (
-        <Card title={`本周待完成（${backfill.length}）`} desc="其他日期还没做完的任务，可以直接在此补打卡。">
-          <ul className="task-list">{backfill.map((b) => renderTask(b, true))}</ul>
-        </Card>
-      )}
+          {backfillDone.length > 0 && (
+            <Panel title={`本周已完成（${backfillDone.length}）`} desc="补录会进入周报统计，可撤销">
+              <ul className="task-list">
+                {backfillDone.map((b) => {
+                  const item = itemMap.get(b.itemId);
+                  return (
+                    <li key={b.id} className="mini-row" style={{ gap: 8 }}>
+                      <span className="check">
+                        <IconCheck />
+                      </span>
+                      <b title={item?.title}>{item?.title ?? '已删除的任务'}</b>
+                      <time>{b.date.slice(5)}</time>
+                      <Button variant="quiet" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'pending')}>
+                        撤销
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Panel>
+          )}
 
-      {backfillDone.length > 0 && (
-        <Card title={`本周已完成（${backfillDone.length}）`} desc="补录的记录会同时进入周报统计，可撤销。">
-          <ul className="task-list">{backfillDone.map((b) => renderTask(b, true))}</ul>
-        </Card>
-      )}
-
-      <Card title="明天之后" desc="提前看一眼，避免临时赶工。">
-        <ul className="bullets">
-          {[1, 2].map((offset) => {
-            const date = addDays(today, offset);
-            const list = state.blocks.filter((b) => b.date === date);
-            return (
-              <li key={date}>
-                {date}：
-                {list.length === 0
-                  ? '暂无安排'
-                  : `${list.length} 项，共 ${fmtDuration(list.reduce((s, b) => s + (b.endMin - b.startMin), 0))}`}
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
+          <Panel title="明天之后" desc="提前看一眼，避免临时赶工">
+            <div className="forecast">
+              {[1, 2].map((offset) => {
+                const date = addDays(today, offset);
+                const list = state.blocks.filter((b) => b.date === date);
+                const min = list.reduce((s, b) => s + (b.endMin - b.startMin), 0);
+                const cap = Math.max(1, state.settings.weekdays[weekdayOf(date)] ?? 0);
+                return (
+                  <div key={date} className="fc">
+                    <b>{date.slice(5)}</b>
+                    <div>
+                      <div className="fc-bar">
+                        <i style={{ width: `${Math.min(100, (min / cap) * 100)}%` }} />
+                      </div>
+                      <small>
+                        {list.length === 0
+                          ? '暂无安排'
+                          : `${list.length} 项 · 共 ${fmtDuration(min)}`}
+                      </small>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="meter-row" style={{ marginTop: 16 }}>
+              <span>今日进度</span>
+              <Meter value={done.length} max={Math.max(1, blocks.length)} />
+              <span className="mono">
+                {blocks.length === 0 ? '—' : `${Math.round((done.length / blocks.length) * 100)}%`}
+              </span>
+            </div>
+          </Panel>
+        </div>
+      </div>
     </div>
   );
 }
 
 function StatusText({ block }: { block: Block }) {
   if (block.status === 'done') {
-    return <span className="ok">已完成 · 实际 {fmtDuration(block.actualMin ?? block.endMin - block.startMin)}</span>;
+    return (
+      <span className="ok">
+        已完成 · 实际 {fmtDuration(block.actualMin ?? block.endMin - block.startMin)}
+      </span>
+    );
   }
-  if (block.status === 'running') return <span className="running">执行中…</span>;
+  if (block.status === 'running') {
+    return (
+      <span className="running-text">
+        <i className="dot-status" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+        执行中…
+      </span>
+    );
+  }
   if (block.status === 'skipped') {
     return (
       <span className="warn">
@@ -265,5 +396,10 @@ function StatusText({ block }: { block: Block }) {
       </span>
     );
   }
-  return <span className="muted">待开始</span>;
+  return (
+    <span>
+      <i className="dot-status" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+      待开始
+    </span>
+  );
 }

@@ -38,7 +38,7 @@ const start = () => {
     rim.position.set(-8, -5, 6);
     scene.add(rim);
 
-    const PALETTE = ['#dff0e6', '#cbe6d7', '#bcdcc8', '#f5ebd9', '#e2efe6', '#cfe8da'];
+    const PALETTE = ['#9ff0d3', '#bfe8dd', '#a8d8e6', '#d8e9f2', '#c6eee0', '#b9dfeb'];
     const sphere = new T.SphereGeometry(1, 24, 16);
     const balls = [];
     const COUNT = 18;
@@ -335,41 +335,41 @@ const start = () => {
 
     // 卡体
     rr(14, 14, W - 28, H - 28, r);
-    g.fillStyle = '#ffffff';
+    g.fillStyle = '#0b1118';
     g.fill();
 
     // 顶部绿色带
     g.save();
     rr(14, 14, W - 28, H - 28, r);
     g.clip();
-    g.fillStyle = '#eaf4ee';
+    g.fillStyle = '#0f1a21';
     g.fillRect(14, 14, W - 28, 132);
-    g.fillStyle = '#277a63';
+    g.fillStyle = '#2be6ae';
     g.fillRect(14, 142, W - 28, 4);
 
     // 品牌标记
-    g.fillStyle = '#43886b';
+    g.fillStyle = '#2be6ae';
     g.fillRect(64, 58, 8, 34);
     g.fillRect(80, 46, 8, 58);
     g.fillRect(96, 54, 8, 42);
-    g.fillStyle = '#202b28';
+    g.fillStyle = '#e9f2f0';
     g.font = '600 34px "PingFang SC","Microsoft YaHei",sans-serif';
     g.fillText('智学节律', 126, 90);
-    g.fillStyle = '#7b8882';
+    g.fillStyle = '#8fa3ad';
     g.font = '400 20px "PingFang SC","Microsoft YaHei",sans-serif';
     g.fillText('让计划跟得上现实', 126, 118);
     g.restore();
 
     // 正文
-    g.fillStyle = '#a4ada7';
+    g.fillStyle = '#5d707a';
     g.font = '400 20px "PingFang SC","Microsoft YaHei",sans-serif';
     g.fillText('学习空间 · 成员卡', 64, 214);
 
-    g.fillStyle = '#202b28';
+    g.fillStyle = '#e9f2f0';
     g.font = '600 62px "PingFang SC","Microsoft YaHei",sans-serif';
     g.fillText('林同学', 62, 300);
 
-    g.fillStyle = '#4a5751';
+    g.fillStyle = '#93a6b0';
     g.font = '400 26px "PingFang SC","Microsoft YaHei",sans-serif';
     g.fillText('考研 · 计算机科学', 64, 344);
 
@@ -377,27 +377,27 @@ const start = () => {
     const items = [['目标', '380 分'], ['阶段', '强化 · 第 6 周'], ['初试', '42 天']];
     items.forEach((it, i) => {
       const x = 64 + i * 210;
-      g.fillStyle = '#a4ada7';
+      g.fillStyle = '#5d707a';
       g.font = '400 18px "PingFang SC","Microsoft YaHei",sans-serif';
       g.fillText(it[0], x, 424);
-      g.fillStyle = '#277a63';
+      g.fillStyle = '#2be6ae';
       g.font = '600 26px "PingFang SC","Microsoft YaHei",sans-serif';
       g.fillText(it[1], x, 460);
     });
 
     // 分隔线 + 条码
-    g.strokeStyle = '#e9eeea';
+    g.strokeStyle = 'rgba(255,255,255,0.14)';
     g.lineWidth = 2;
     g.beginPath(); g.moveTo(64, 500); g.lineTo(W - 64, 500); g.stroke();
 
     let bx = 64;
     while (bx < 360) {
       const w = 2 + Math.random() * 5;
-      g.fillStyle = '#202b28';
+      g.fillStyle = '#93a6b0';
       g.fillRect(bx, 528, w, 52);
       bx += w + 4;
     }
-    g.fillStyle = '#7b8882';
+    g.fillStyle = '#5d707a';
     g.font = '400 18px "SF Mono",Consolas,monospace';
     g.fillText('ZX-2027-1107 · VALID 07/2026 — 12/2026', 64, 612);
 
@@ -407,7 +407,7 @@ const start = () => {
     g.arc(W / 2, 44, 17, 0, Math.PI * 2);
     g.fill();
     g.globalCompositeOperation = 'source-over';
-    g.strokeStyle = '#dbe5de';
+    g.strokeStyle = 'rgba(255,255,255,0.22)';
     g.lineWidth = 4;
     g.beginPath();
     g.arc(W / 2, 44, 19, 0, Math.PI * 2);

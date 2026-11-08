@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, Empty, Field, Meter, Stat } from '../components';
+import { Button, Empty, Field, Meter, Panel } from '../components';
 import { packWeek } from '../domain/engine';
 import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
-import { SUBJECT_LABEL } from '../domain/types';
 import type { AppState, Actions } from '../store';
 
 const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -62,14 +61,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const plannedMin = shown.reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const bufferMin = shown.filter((b) => b.isBuffer).reduce((s, b) => s + (b.endMin - b.startMin), 0);
   const editing = saved.find((b) => b.id === editingId) ?? null;
-
-  /** 翻周时清掉上一周留下的提示与编辑面板，避免提示串周 */
-  function switchWeek(next: string) {
-    setWeekStart(next);
-    setNotice('');
-    setEditingId(null);
-    setEditError('');
-  }
+  const doneCount = saved.filter((b) => b.status === 'done').length;
 
   /** 排程统一入口：fill 只补没有块的任务，rebuild 清掉未完成块后整周重排 */
   async function runGenerate(mode: 'fill' | 'rebuild') {
@@ -95,9 +87,18 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
 
   if (!state.goal || items.length === 0) {
     return (
-      <Card title="周视图" desc="先生成目标和计划项，才能排出这一周。">
-        <Empty title="没有可排的计划" desc="到「目标」页添加计划项后回到这里。" />
-      </Card>
+      <div className="page page-enter">
+        <header className="page-head">
+          <div>
+            <div className="eyebrow">WEEK · 周视图</div>
+            <h1>周视图</h1>
+            <p className="sub">先生成目标和计划项，才能排出这一周。</p>
+          </div>
+        </header>
+        <Panel>
+          <Empty title="没有可排的计划" desc="到「目标」页添加计划项后回到这里。" />
+        </Panel>
+      </div>
     );
   }
 
@@ -111,59 +112,133 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   }
 
   return (
-    <div className="stack">
-      <Card
-        title={`${weekStart} — ${addDays(weekStart, 6)}`}
-        desc={
-          hasSaved
-            ? `已完成 ${saved.filter((b) => b.status === 'done').length} 项`
-            : previewable
-              ? '以下为预览，点击「生成本周计划」后写入'
-              : '这一周还没有排计划'
-        }
-        action={
-          <div className="row">
-            <Button onClick={() => switchWeek(addDays(weekStart, -7))} aria-label="上一周">
-              ‹
-            </Button>
-            <Button variant="quiet" onClick={() => switchWeek(startOfWeek(todayISO(), state.settings.weekStart))}>
-              本周
-            </Button>
-            <Button onClick={() => switchWeek(addDays(weekStart, 7))} aria-label="下一周">
-              ›
-            </Button>
+    <div className="page page-enter">
+      <header className="page-head">
+        <div>
+          <div className="eyebrow">
+            <span className="live" />
+            {weekStart} — {addDays(weekStart, 6)}
           </div>
-        }
-      >
-        <div className="stats">
-          <Stat label="本周可用" value={(capacity / 60).toFixed(1)} unit="小时" />
-          <Stat label="已排计划" value={(plannedMin / 60).toFixed(1)} unit="小时" />
-          <Stat
-            label="占用率"
-            value={capacity > 0 ? String(Math.round((plannedMin / capacity) * 100)) : '—'}
-            unit={capacity > 0 ? '%' : undefined}
-          />
-          <Stat label="弹性位占用" value={String(Math.round(bufferMin))} unit="分钟" />
+          <h1>这一周怎么用</h1>
+          <p className="sub">
+            {hasSaved ? (
+              <>
+                已完成 <b>{doneCount}</b> 项 · 共 <b>{saved.length}</b> 个任务块
+              </>
+            ) : (
+              '以下为排程预览，点击「生成本周计划」后写入'
+            )}
+          </p>
         </div>
-        <div className="meter-row">
-          <span>容量</span>
-          <Meter value={plannedMin} max={Math.max(capacity, plannedMin)} tone={plannedMin > capacity ? 'red' : 'green'} />
-          <span className="muted">
-            {fmtDuration(plannedMin)} / {fmtDuration(capacity)}
-          </span>
-        </div>
-        <div className="row">
+        <div className="head-actions">
+          <Button className="btn-icon" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="上一周">
+            ‹
+          </Button>
+          <Button onClick={() => setWeekStart(startOfWeek(todayISO(), state.settings.weekStart))}>本周</Button>
+          <Button className="btn-icon" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="下一周">
+            ›
+          </Button>
           <Button variant="primary" disabled={busy} onClick={() => void runGenerate(hasSaved ? 'rebuild' : 'fill')}>
             {busy ? '排程中…' : hasSaved ? '重新排这一周' : '生成本周计划'}
           </Button>
-          {hasSaved && (
-            <Button variant="quiet" disabled={busy} onClick={() => void runGenerate('fill')}>
-              只补新任务
-            </Button>
-          )}
-          {notice && <span className="notice">{notice}</span>}
         </div>
-      </Card>
+      </header>
+
+      {notice && <p className="notice">{notice}</p>}
+
+      <Panel flush>
+        <div className="week-stats">
+          <div className="wk">
+            <span>本周可用</span>
+            <b>
+              {(capacity / 60).toFixed(1)}
+              <small>小时</small>
+            </b>
+          </div>
+          <div className="wk">
+            <span>已排计划</span>
+            <b>
+              {(plannedMin / 60).toFixed(1)}
+              <small>小时</small>
+            </b>
+          </div>
+          <div className="wk">
+            <span>占用率</span>
+            <b>
+              {capacity > 0 ? Math.round((plannedMin / capacity) * 100) : '—'}
+              {capacity > 0 && <small>%</small>}
+            </b>
+          </div>
+          <div className="wk">
+            <span>弹性位占用</span>
+            <b>
+              {Math.round(bufferMin)}
+              <small>分钟</small>
+            </b>
+          </div>
+        </div>
+
+        <div className="panel-body tight" style={{ paddingTop: 0 }}>
+          <div className="meter-row">
+            <span>容量</span>
+            <Meter value={plannedMin} max={Math.max(capacity, plannedMin)} tone={plannedMin > capacity ? 'red' : 'green'} />
+            <span className="mono">
+              {fmtDuration(plannedMin)} / {fmtDuration(capacity)}
+            </span>
+          </div>
+        </div>
+
+        <div className="week scroll">
+          {dates.map((date) => {
+            const dayBlocks = shown.filter((b) => b.date === date);
+            const dayPlanned = dayBlocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
+            const cap = Math.max(0, state.settings.weekdays[weekdayOf(date)] ?? 0);
+            const isToday = date === today;
+            const fill = cap > 0 ? Math.min(100, Math.round((dayPlanned / cap) * 100)) : 0;
+            return (
+              <div key={date} className={`day ${isToday ? 'day-today' : ''}`}>
+                <div className="day-head">
+                  <span>{WEEKDAY_LABEL[weekdayOf(date)]}</span>
+                  <b>{date.slice(8)}</b>
+                </div>
+                <div className="day-cap">
+                  <i className={fill > 100 ? 'full' : ''} style={{ width: `${fill}%` }} />
+                </div>
+                <div className="day-body">
+                  {dayBlocks.length === 0 ? (
+                    <span className="slot-empty">{cap === 0 ? '休息' : '留白'}</span>
+                  ) : (
+                    dayBlocks.map((b) => {
+                      const item = itemMap.get(b.itemId);
+                      // 只有已落库的块才能调整；预览块点击无对象可改，不显示入口
+                      const movable = hasSaved && (b.status === 'pending' || b.status === 'running');
+                      return (
+                        <div
+                          key={b.id}
+                          className={`slot slot-${item?.subject ?? 'other'} ${b.isBuffer ? 'slot-buffer' : ''} ${
+                            b.status === 'done' ? 'slot-done' : ''
+                          }`}
+                        >
+                          <b>{item?.title ?? '已删除的任务'}</b>
+                          <small>
+                            {fmtHM(b.startMin)} · {fmtDuration(b.endMin - b.startMin)}
+                            {b.isBuffer ? ' · 弹性' : ''}
+                          </small>
+                          {movable && (
+                            <button type="button" className="slot-edit" onClick={() => startEdit(b.id)}>
+                              调整
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
 
       {noRoomLeft && isCurrentWeek && (
         <div className="hint-bar">
@@ -184,8 +259,16 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
         </div>
       )}
 
+      {!hasSaved && !previewable && (
+        <div className="hint-bar">
+          <span>
+            {weekStart} — {addDays(weekStart, 6)} 这一周还没有排计划。点「生成本周计划」把待完成任务排进这一周的可用时段。
+          </span>
+        </div>
+      )}
+
       {editing && (
-        <Card
+        <Panel
           title="调整任务时间"
           desc={`${itemMap.get(editing.itemId)?.title ?? '任务'} · 时长 ${fmtDuration(editing.endMin - editing.startMin)}（不可在此修改）`}
         >
@@ -203,7 +286,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
               <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
             </Field>
           </div>
-          <div className="row">
+          <div className="row" style={{ marginTop: 14 }}>
             <Button
               variant="primary"
               onClick={() => {
@@ -240,99 +323,64 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
             </Button>
           </div>
           {editError && <span className="warn">{editError}</span>}
-        </Card>
+        </Panel>
       )}
 
-      {!hasSaved && !previewable && (
-        <div className="hint-bar">
-          <span>
-            {weekStart} — {addDays(weekStart, 6)} 这一周还没有排计划。点「生成本周计划」把待完成任务排进这一周的可用时段。
-          </span>
-        </div>
-      )}
+      <div className="split-2">
+        {packed.overflow.length > 0 ? (
+          <Panel title={`装不下的计划项（${packed.overflow.length}）`} desc="容量不足，剩余部分会留到下一周">
+            <ul className="item-list">
+              {packed.overflow.map((o) => (
+                <li key={o.item.id}>
+                  <strong title={o.item.title}>{o.item.title}</strong>
+                  <span className="muted">剩余 {fmtDuration(o.remainingMin ?? o.item.estimateMin)}</span>
+                  <Button variant="quiet" size="sm" onClick={() => void actions.removeItem(o.item.id)}>
+                    移除
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ) : (
+          <Panel className="insight-card" title="排程说明">
+            <ul className="bullets">
+              {hasSaved ? (
+                <>
+                  <li>本周已生成 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
+                  <li>已完成或已调整的块不会被「补排新任务」覆盖。</li>
+                </>
+              ) : (
+                packed.suggestions.map((s) => <li key={s}>{s}</li>)
+              )}
+              <li>超过单日容量的任务会自动拆分到多天，不丢工作量。</li>
+            </ul>
+          </Panel>
+        )}
 
-      <div className="week-grid">
-        {dates.map((date) => {
-          const dayBlocks = shown.filter((b) => b.date === date);
-          const dayPlanned = dayBlocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
-          const cap = Math.max(0, state.settings.weekdays[weekdayOf(date)] ?? 0);
-          const isToday = date === todayISO();
-          return (
-            <div key={date} className={`day ${isToday ? 'day-today' : ''}`}>
-              <header>
-                <span>{WEEKDAY_LABEL[weekdayOf(date)]}</span>
-                <strong>{date.slice(8)}</strong>
-                <small>{cap === 0 ? '休息' : `${(dayPlanned / 60).toFixed(1)} / ${(cap / 60).toFixed(1)}h`}</small>
-              </header>
-              <div className="day-body">
-                {dayBlocks.length === 0 ? (
-                  <span className="slot-empty">{cap === 0 ? '—' : '留白'}</span>
-                ) : (
-                  dayBlocks.map((b) => {
-                    const item = itemMap.get(b.itemId);
-                    // 只有已落库的块才能调整；预览块点击无对象可改，不显示入口
-                    const movable = hasSaved && (b.status === 'pending' || b.status === 'running');
-                    return (
-                      <div
-                        key={b.id}
-                        className={`slot slot-${item?.subject ?? 'other'} ${b.isBuffer ? 'slot-buffer' : ''} ${
-                          b.status === 'done' ? 'slot-done' : ''
-                        }`}
-                      >
-                        <b>{item?.title ?? '已删除的任务'}</b>
-                        <small>
-                          {fmtHM(b.startMin)} · {fmtDuration(b.endMin - b.startMin)}
-                          {b.isBuffer ? ' · 弹性' : ''}
-                        </small>
-                        {item && <span className="slot-subject">{SUBJECT_LABEL[item.subject]}</span>}
-                        {movable && (
-                          <button type="button" className="slot-edit" onClick={() => startEdit(b.id)}>
-                            调整
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          );
-        })}
+        <Panel title="本周节奏" desc="柱高 = 当天已排时长占可用时长">
+          <div className="stack-tight">
+            {dates.map((d) => {
+              const min = shown.filter((b) => b.date === d).reduce((s, b) => s + (b.endMin - b.startMin), 0);
+              const cap = Math.max(1, state.settings.weekdays[weekdayOf(d)] ?? 0);
+              return (
+                <div key={d} className="fc">
+                  <b>{WEEKDAY_LABEL[weekdayOf(d)]}</b>
+                  <div>
+                    <div className="fc-bar">
+                      <i style={{ width: `${Math.min(100, (min / cap) * 100)}%` }} />
+                    </div>
+                    <small>{min === 0 ? '留白' : `${(min / 60).toFixed(1)} / ${(cap / 60).toFixed(1)} 小时`}</small>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
       </div>
 
-      {packed.overflow.length > 0 && (
-        <Card title={`装不下的计划项（${packed.overflow.length}）`} desc="容量不足，剩余部分会留到下一周。">
-          <ul className="item-list">
-            {packed.overflow.map((o) => (
-              <li key={o.item.id}>
-                <strong>{o.item.title}</strong>
-                <span className="muted">
-                  剩余 {fmtDuration(o.remainingMin ?? o.item.estimateMin)}
-                </span>
-                <Button variant="quiet" onClick={() => void actions.removeItem(o.item.id)}>
-                  移除
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </Card>
+      {hasSaved && editing === null && (
+        <div className="center-note">点任务块上的「调整」可以改日期与开始时间，时长保持不变。</div>
       )}
-
-      <Card title="排程说明">
-        <ul className="bullets">
-          {hasSaved ? (
-            <>
-              <li>这一周已排 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
-              <li>点「重新排这一周」会重排未完成的块，已完成记录保留。</li>
-            </>
-          ) : previewable ? (
-            packed.suggestions.map((s) => <li key={s}>{s}</li>)
-          ) : (
-            <li>这一周还没有排计划，点「生成本周计划」把待完成任务排进来。</li>
-          )}
-          <li>超过单日容量的任务会自动拆分到多天，不丢工作量。</li>
-        </ul>
-      </Card>
     </div>
   );
 }

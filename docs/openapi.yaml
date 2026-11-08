@@ -253,7 +253,7 @@ paths:
         - { name: manual, in: query, required: false, schema: { type: boolean }, description: 用户主动发起时传 true }
       responses:
         '200':
-          description: '{ trigger, options[], blocked, calibration, replanCount }；每个方案含 summary / loadIncreasePct / feasible'
+          description: '{ trigger, options[], blocked, calibration, replanCount }；每个方案含 summary / loadIncreasePct / applicable / feasible'
   /api/plan/replan/apply:
     post:
       summary: 应用选定的重排方案（重写本周未完成块，必要时修改或移除计划项）
@@ -271,4 +271,4 @@ paths:
         '200':
           description: '{ applied, summary: { added, deferred, dropped, deferredMin }, replanCount, blocks }'
         '409': { description: 已达重排上限（E1035）或该方案仍装不下（E1034） }
-        '400': { description: 未知方案（E1033） }
+        '400': { description: 未知方案（E1033）或方案不适用（E1036） }

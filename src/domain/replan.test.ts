@@ -39,10 +39,17 @@ describe('detectReplanTrigger · 触发条件', () => {
     expect(trigger.reasons.some((r) => r.code === 'backlog')).toBe(true);
   });
 
-  it('连续三天无执行记录进入挽救模式', () => {
-    const trigger = detectReplanTrigger({ blocks: [], items: [], settings, weekStart, today });
+  it('曾经执行过但最近三天无记录才进入挽救模式', () => {
+    const history = [block('old', '2026-10-30', 1140, 60, 'done')];
+    const trigger = detectReplanTrigger({ blocks: history, items: [], settings, weekStart, today });
     expect(trigger.rescue).toBe(true);
     expect(trigger.reasons.some((r) => r.code === 'long-break')).toBe(true);
+  });
+
+  it('全新用户不会被判定为中断', () => {
+    const trigger = detectReplanTrigger({ blocks: [], items: [], settings, weekStart, today });
+    expect(trigger.rescue).toBe(false);
+    expect(trigger.reasons.some((r) => r.code === 'long-break')).toBe(false);
   });
 
   it('主动请求排在原因列表首位', () => {
@@ -88,11 +95,46 @@ describe('planReplan · 重排方案', () => {
 
   it('负载增幅超过 20% 时标记为不可行（硬约束）', () => {
     const heavy = [item('a', 900, 5), item('b', 900, 5)];
-    const current = [block('p1', '2026-11-10', 1140, 60)];
+    const current: Block[] = [
+      { id: 'p1', itemId: 'a', date: '2026-11-10', startMin: 1140, endMin: 1200, isBuffer: false, status: 'pending' },
+    ];
     const result = planReplan({ blocks: current, items: heavy, settings, weekStart, today });
     const defer = result.options.find((o) => o.key === 'defer')!;
     expect(defer.loadIncreasePct).toBeGreaterThan(20);
     expect(defer.feasible).toBe(false);
+  });
+
+  it('没有可压缩/可替换的对象时标记为不适用', () => {
+    const core = [item('核心A', 300, 5), item('核心B', 300, 4)];
+    const result = planReplan({ blocks: [], items: core, settings, weekStart, today });
+    const get = (k: string) => result.options.find((o) => o.key === k)!;
+    expect(get('defer').applicable).toBe(true);
+    expect(get('compress').applicable).toBe(false);
+    expect(get('substitute').applicable).toBe(false);
+    expect(get('drop').applicable).toBe(true);
+    expect(get('compress').feasible).toBe(false);
+    expect(get('compress').reason).toContain('没有可压缩');
+    expect(get('substitute').reason).toContain('没有权重 ≤ 2');
+  });
+
+  it('本周只有一个任务时「放弃」不适用（等于清空整周）', () => {
+    const result = planReplan({ blocks: [], items: [item('唯一任务', 120, 5)], settings, weekStart, today });
+    const drop = result.options.find((o) => o.key === 'drop')!;
+    expect(drop.applicable).toBe(false);
+    expect(drop.reason).toContain('清空整周');
+    expect(drop.itemChanges).toHaveLength(0);
+  });
+
+  it('只重排本周已排块的任务，不把整个计划塞进一周', () => {
+    const all = [item('i-p1', 300, 4), item('未排的A', 6000, 5), item('未排的B', 6000, 5)];
+    const current: Block[] = [
+      { id: 'p1', itemId: 'i-p1', date: '2026-11-10', startMin: 1140, endMin: 1260, isBuffer: false, status: 'pending' },
+    ];
+    const result = planReplan({ blocks: current, items: all, settings, weekStart, today });
+    for (const o of result.options) {
+      const ids = new Set(o.blocks.map((b) => b.itemId));
+      expect([...ids].every((id) => id === 'i-p1')).toBe(true);
+    }
   });
 
   it('连续三次重排仍不可行时停止重排，转为目标校准建议', () => {

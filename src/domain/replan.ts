@@ -73,7 +73,9 @@ export function detectReplanTrigger(input: {
   // 连续 ≥ 3 天无执行记录 → 挽救模式
   const breakDays = [0, 1, 2].map((i) => addDays(today, -i));
   const hasDone = blocks.some((b) => breakDays.includes(b.date) && b.status === 'done');
-  const rescue = !hasDone;
+  // 只有"确实执行过、但最近三天没记录"才算中断；全新用户不该被判定为断更
+  const everDone = blocks.some((b) => b.status === 'done');
+  const rescue = everDone && !hasDone;
   if (rescue) {
     reasons.push({ code: 'long-break', label: '连续多日没有执行记录', detail: '转入挽救模式，不再追加任务' });
   }
@@ -92,6 +94,7 @@ interface OptionSpec {
   cost: string;
   items: PlanItem[];
   itemChanges: ReplanItemChange[];
+  applicable: boolean;
 }
 
 /**
@@ -126,7 +129,11 @@ export function planReplan(input: {
     .filter((b) => b.date >= from)
     .reduce((s, b) => s + (b.endMin - b.startMin), 0);
 
-  const active = items
+  // 重排的对象是「这一周已经排了块的任务」，而不是整个计划：
+  // 把全部待办都塞进一周会让每个方案都显示"延期 100+ 小时"，没有产品意义。
+  const weekItemIds = new Set(weekBlocks.map((b) => b.itemId));
+  const pool = weekItemIds.size > 0 ? items.filter((i) => weekItemIds.has(i.id)) : items;
+  const active = pool
     .map((i) => ({ ...i, estimateMin: Math.max(0, i.remainingMin ?? i.estimateMin) }))
     .filter((i) => i.estimateMin > 0);
 
@@ -140,6 +147,7 @@ export function planReplan(input: {
     cost: '未来的弹性空间会被挤占，下一周会更紧',
     items: active,
     itemChanges: [],
+    applicable: true,
   });
 
   // 2. 压缩：非核心节点（权重 ≤ 3）工时压到 70%
@@ -154,32 +162,51 @@ export function planReplan(input: {
   specs.push({
     key: 'compress',
     label: '压缩非核心任务',
-    reason: '把权重 ≤ 3 的任务工时压缩 30%，先保证核心任务排得下',
-    cost: '学习深度会下降，被压缩的任务会标记为「降级」',
+    reason:
+      compressChanges.length > 0
+        ? `把 ${compressChanges.length} 个权重 ≤ 3 的任务工时压缩 30%，先保证核心任务排得下`
+        : '本周排的都是核心任务（权重 > 3），没有可压缩的非核心项',
+    cost:
+      compressChanges.length > 0
+        ? '学习深度会下降，被压缩的任务会标记为「降级」'
+        : '这条方案在当前排布下用不上',
     items: compressed,
     itemChanges: compressChanges,
+    applicable: compressChanges.length > 0,
   });
 
   // 3. 替代：不再排最低权重的任务，把时间让给高权重
   const substituted = active.filter((i) => i.weight > 2);
+  const substitutable = active.length - substituted.length;
   specs.push({
     key: 'substitute',
     label: '用核心任务替换',
-    reason: '暂时不排权重 ≤ 2 的任务，把时间让给高频高权重的部分',
-    cost: '覆盖范围收窄，低权重任务会推迟到下一轮',
+    reason:
+      substitutable > 0
+        ? `本周先不排 ${substitutable} 个权重 ≤ 2 的任务，把时间让给高频高权重的部分`
+        : '本周没有权重 ≤ 2 的任务可供替换',
+    cost:
+      substitutable > 0 ? '覆盖范围收窄，低权重任务会推迟到下一轮' : '这条方案在当前排布下用不上',
     items: substituted,
     itemChanges: [],
+    applicable: substitutable > 0,
   });
 
   // 4. 放弃：显式放弃权重最低的一项（需用户确认并留痕）
   const lowest = [...active].sort((a, b) => a.weight - b.weight)[0];
+  const dropApplicable = Boolean(lowest) && active.length > 1;
   specs.push({
     key: 'drop',
     label: '放弃最低优先级任务',
-    reason: lowest ? `放弃「${lowest.title}」，其余任务按原工时推进` : '没有可放弃的任务',
-    cost: '该任务会从计划中移除并留痕，可由用户手动恢复',
-    items: active.filter((i) => i.id !== lowest?.id),
-    itemChanges: lowest ? [{ id: lowest.id, remove: true }] : [],
+    reason: dropApplicable
+      ? `放弃「${lowest!.title}」，其余任务按原工时推进`
+      : active.length <= 1
+        ? '本周只有一个任务，放弃它等于清空整周'
+        : '没有可放弃的任务',
+    cost: dropApplicable ? '该任务会从计划中移除并留痕，可由用户手动恢复' : '这条方案在当前排布下用不上',
+    items: dropApplicable ? active.filter((i) => i.id !== lowest!.id) : active,
+    itemChanges: dropApplicable ? [{ id: lowest!.id, remove: true }] : [],
+    applicable: dropApplicable,
   });
 
   const options: ReplanOption[] = specs.map((spec) => {
@@ -209,8 +236,11 @@ export function planReplan(input: {
       loadIncreasePct,
       // 顺延的语义就是"装不下的留到下周"，因此延期量不影响它的可行性；
       // 压缩/替代/放弃则要求本周能完全装下。
+      applicable: spec.applicable,
       feasible:
-        loadIncreasePct <= MAX_LOAD_INCREASE_PCT && (spec.key === 'defer' || deferredMin === 0),
+        spec.applicable &&
+        loadIncreasePct <= MAX_LOAD_INCREASE_PCT &&
+        (spec.key === 'defer' || deferredMin === 0),
       blocks: packed.blocks,
       itemChanges: spec.itemChanges,
     };

@@ -297,6 +297,7 @@ export function createApi(db) {
           plannedMin: o.plannedMin,
           bufferMin: o.bufferMin,
           loadIncreasePct: o.loadIncreasePct,
+          applicable: o.applicable,
           feasible: o.feasible,
         })),
       };
@@ -324,6 +325,7 @@ export function createApi(db) {
       }
       const option = plan.options.find((o) => o.key === key);
       if (!option) throw bad('E1033', '未知的重排方案');
+      if (!option.applicable) throw bad('E1036', '这个方案在当前排布下不适用');
       if (!option.feasible && (option.key === 'defer' || option.key === 'compress')) {
         throw new HttpError(409, 'E1034', '这个方案仍然装不下，建议改用「替代」或「放弃」，或延长目标日期');
       }

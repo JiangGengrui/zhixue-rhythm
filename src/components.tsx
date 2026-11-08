@@ -1,16 +1,22 @@
+import { useEffect, useId, useState } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
-export function Card(props: {
+/* ══ 基础容器 ══ */
+
+export function Panel(props: {
   title?: string;
   desc?: string;
   action?: ReactNode;
   children?: ReactNode;
   className?: string;
+  bodyClass?: string;
+  /** 正文自己带内边距时用 */
+  flush?: boolean;
 }) {
   return (
-    <section className={`card ${props.className ?? ''}`}>
+    <section className={`panel ${props.className ?? ''}`}>
       {(props.title || props.action) && (
-        <header className="card-head">
+        <header className="panel-head">
           <div>
             {props.title && <h2>{props.title}</h2>}
             {props.desc && <p>{props.desc}</p>}
@@ -18,38 +24,164 @@ export function Card(props: {
           {props.action}
         </header>
       )}
-      {props.children}
+      <div className={props.flush ? undefined : `panel-body ${props.bodyClass ?? ''}`}>{props.children}</div>
     </section>
   );
 }
 
-export function Stat(props: { label: string; value: string; unit?: string; note?: string }) {
+/* ══ 数字滚动 ══ */
+
+function useCountUp(raw: string, duration = 560) {
+  const numeric = /^-?\d+(\.\d+)?$/.test(raw);
+  const target = Number(raw);
+  const [shown, setShown] = useState(numeric ? 0 : NaN);
+
+  useEffect(() => {
+    if (!numeric) return;
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setShown(target);
+      return;
+    }
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(target * eased);
+      if (p < 1) raf = requestAnimationFrame(step);
+      else setShown(target);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [numeric, target, duration]);
+
+  if (!numeric) return raw;
+  const decimals = raw.includes('.') ? raw.split('.')[1]!.length : 0;
+  return shown.toFixed(decimals);
+}
+
+export function Stat(props: {
+  label: string;
+  value: string;
+  unit?: string;
+  note?: string;
+  tone?: 'up' | 'warn';
+}) {
+  const shown = useCountUp(props.value);
   return (
     <div className="stat">
       <span className="stat-label">{props.label}</span>
       <strong className="stat-value">
-        {props.value}
+        {shown}
         {props.unit && <small>{props.unit}</small>}
       </strong>
-      {props.note && <span className="stat-note">{props.note}</span>}
+      {props.note && <span className={`stat-note ${props.tone === 'up' ? 'up' : ''}`}>{props.note}</span>}
     </div>
   );
 }
 
+/* ══ 环形进度 ══ */
+
+export function Ring(props: {
+  value: number;
+  max: number;
+  size?: number;
+  label?: string;
+  suffix?: string;
+  stroke?: number;
+}) {
+  const size = props.size ?? 132;
+  const stroke = props.stroke ?? 9;
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const pct = props.max > 0 ? Math.max(0, Math.min(1, props.value / props.max)) : 0;
+  const r = (size - stroke) / 2 - 2;
+  const c = 2 * Math.PI * r;
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setOn(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  return (
+    <div className="ring-wrap" style={{ width: size, height: size }}>
+      <svg className="ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <defs>
+          <linearGradient id={`ring-${uid}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="var(--mint)" />
+            <stop offset="1" stopColor="var(--cyan)" />
+          </linearGradient>
+        </defs>
+        <circle className="ring-bg" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} />
+        <circle
+          className="ring-fg"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={stroke}
+          stroke={`url(#ring-${uid})`}
+          strokeDasharray={c}
+          strokeDashoffset={on ? c * (1 - pct) : c}
+        />
+      </svg>
+      <div className="ring-center">
+        <b>
+          {Math.round(pct * 100)}
+          <span>{props.suffix ?? '%'}</span>
+        </b>
+        {props.label && <small>{props.label}</small>}
+      </div>
+    </div>
+  );
+}
+
+/* ══ 细进度条 ══ */
+
+export function Meter(props: { value: number; max: number; tone?: 'green' | 'amber' | 'red' | 'quiet' }) {
+  const pct = props.max > 0 ? Math.min(100, Math.round((props.value / props.max) * 100)) : 0;
+  return (
+    <div className="meter" role="img" aria-label={`占用 ${pct}%`}>
+      <i className={`meter-fill tone-${props.tone ?? 'green'}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/* ══ 周容量柱状 ══ */
+
+export function Sparkbars(props: { values: number[]; todayIndex?: number }) {
+  const max = Math.max(1, ...props.values);
+  return (
+    <div className="cap-bars" aria-hidden="true">
+      {props.values.map((v, i) => {
+        const h = v <= 0 ? 8 : Math.max(18, Math.round((v / max) * 100));
+        const cls = i === props.todayIndex ? 'today' : v > 0 ? 'fill' : '';
+        return <i key={i} className={cls} style={{ height: `${v <= 0 ? 8 : h}%` }} />;
+      })}
+    </div>
+  );
+}
+
+/* ══ 按钮 ══ */
+
 export function Button(
   props: ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: 'primary' | 'ghost' | 'quiet' | 'danger';
+    size?: 'sm' | 'md';
   },
 ) {
-  const { variant = 'ghost', className = '', ...rest } = props;
-  return <button type="button" className={`btn btn-${variant} ${className}`} {...rest} />;
+  const { variant = 'ghost', size = 'md', className = '', ...rest } = props;
+  return (
+    <button
+      type="button"
+      className={`btn btn-${variant} ${size === 'sm' ? 'btn-sm' : ''} ${className}`}
+      {...rest}
+    />
+  );
 }
 
-export function Field(props: {
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}) {
+/* ══ 表单字段 ══ */
+
+export function Field(props: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="field">
       <span className="field-label">{props.label}</span>
@@ -58,6 +190,8 @@ export function Field(props: {
     </label>
   );
 }
+
+/* ══ 空状态 ══ */
 
 export function Empty(props: { title: string; desc?: string; action?: ReactNode }) {
   return (
@@ -69,11 +203,90 @@ export function Empty(props: { title: string; desc?: string; action?: ReactNode 
   );
 }
 
-export function Meter(props: { value: number; max: number; tone?: 'green' | 'amber' | 'red' }) {
-  const pct = props.max > 0 ? Math.min(100, Math.round((props.value / props.max) * 100)) : 0;
+/* ══ 主题切换 ══ */
+
+export function ThemeToggle(props: { theme: 'dark' | 'light'; onToggle: () => void }) {
+  const label = props.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
   return (
-    <div className="meter" role="img" aria-label={`已用 ${pct}%`}>
-      <i className={`meter-fill tone-${props.tone ?? 'green'}`} style={{ width: `${pct}%` }} />
-    </div>
+    <button type="button" className="theme-toggle" onClick={props.onToggle} aria-label={label} title={label}>
+      <span className="thumb" aria-hidden="true" />
+      <span className={`opt ${props.theme === 'dark' ? 'on' : ''}`} aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8Z" />
+        </svg>
+      </span>
+      <span className={`opt ${props.theme === 'light' ? 'on' : ''}`} aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4.2" />
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+/* ══ 图标 ══ */
+
+type IconProps = { className?: string };
+
+export function IconToday({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.2" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  );
+}
+
+export function IconGoal({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.2" />
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M12 3.8V2M12 22v-1.8M3.8 12H2M22 12h-1.8" />
+    </svg>
+  );
+}
+
+export function IconWeek({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.6" />
+      <path d="M3.5 9.6h17M9 9.6v9.9M15 9.6v9.9" />
+    </svg>
+  );
+}
+
+export function IconReport({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 19.5V9M9.5 19.5V4.5M15 19.5v-7M20.5 19.5v-4" />
+    </svg>
+  );
+}
+
+export function IconSettings({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+      <circle cx="15" cy="7" r="2.2" />
+      <circle cx="9" cy="17" r="2.2" />
+    </svg>
+  );
+}
+
+export function IconCheck({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2 6.4 4.8 9 10 3.2" />
+    </svg>
+  );
+}
+
+export function IconLogout({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M15 5.5H7.5A1.5 1.5 0 0 0 6 7v10a1.5 1.5 0 0 0 1.5 1.5H15M13 12h8M18 9l3 3-3 3" />
+    </svg>
   );
 }

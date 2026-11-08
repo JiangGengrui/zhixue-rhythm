@@ -238,6 +238,8 @@ export interface ReplanOption {
   bufferMin: number;
   /** 未来 7 天负载相对当前增幅（%），硬约束 ≤ 20 */
   loadIncreasePct: number;
+  /** 该方案在当前排布下是否用得上（如没有可压缩项时为 false） */
+  applicable: boolean;
   feasible: boolean;
   /** 该方案下本周的块（可直接落库） */
   blocks: Block[];
