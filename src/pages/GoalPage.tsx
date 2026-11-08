@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Button, Empty, Field, Meter, Panel, Ring, Stat } from '../components';
 import { feasibility } from '../domain/engine';
 import { LEVEL_LABEL, SUBJECT_LABEL } from '../domain/types';
-import type { Level, Subject, Verdict } from '../domain/types';
+import type { GoalTemplate, Level, StageKey, Subject, Verdict } from '../domain/types';
+import type { DecomposeResponse } from '../data/api';
 import { daysBetween, fmtDuration, todayISO } from '../domain/date';
 import type { AppState, Actions } from '../store';
 
@@ -33,6 +34,10 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
     weight: 3,
   });
   const [notice, setNotice] = useState('');
+  const [template, setTemplate] = useState<GoalTemplate>('postgrad-cs');
+  const [plan, setPlan] = useState<DecomposeResponse | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planMsg, setPlanMsg] = useState('');
 
   const result = useMemo(
     () => (goal ? feasibility(goal, items, todayISO()) : null),
@@ -85,6 +90,55 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
     });
     setDraft({ ...draft, title: '' });
     setNotice('已添加计划项');
+  }
+
+  const TEMPLATES: Array<{ key: GoalTemplate; label: string }> = [
+    { key: 'postgrad-cs', label: '考研 · 计算机' },
+    { key: 'civil-service', label: '考公 · 行测申论' },
+    { key: 'project-self', label: '项目导学' },
+  ];
+  const STAGE_TEXT: Record<StageKey, string> = { foundation: '基础', strengthen: '强化', sprint: '冲刺' };
+  const REASON_TEXT: Record<string, string> = {
+    'low-priority': '低频低分',
+    mastered: '已有基础',
+    merged: '已合并',
+  };
+
+  async function previewPlan() {
+    if (!goal) {
+      setNotice('请先保存目标');
+      return;
+    }
+    setPlanBusy(true);
+    setPlanMsg('正在拆解…');
+    try {
+      const res = await actions.decompose(template);
+      setPlan(res);
+      setPlanMsg(`已生成 ${res.result.items.length} 个计划项草案`);
+    } catch (err) {
+      setPlanMsg(err instanceof Error ? err.message : '拆解失败');
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
+  async function adoptPlan() {
+    if (!plan) return;
+    const ok = confirm(
+      `将用 ${plan.result.items.length} 条计划项替换现有的 ${items.length} 条，并清空已排任务块。确定吗？`,
+    );
+    if (!ok) return;
+    setPlanBusy(true);
+    setPlanMsg('正在写入…');
+    try {
+      const res = await actions.decompose(template, true);
+      setPlan(res);
+      setPlanMsg(`已写入 ${res.applied} 条计划项，去「周视图」生成这一周的计划`);
+    } catch (err) {
+      setPlanMsg(err instanceof Error ? err.message : '写入失败');
+    } finally {
+      setPlanBusy(false);
+    }
   }
 
   const goalForm = (
@@ -316,6 +370,85 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
             <p className="advice" style={{ marginTop: 14 }}>
               判定阈值：≤0.85 从容 · ≤1.00 合理 · ≤1.15 偏紧 · 更高则不可行。
             </p>
+          </Panel>
+
+          <Panel
+            title="智能拆解"
+            desc="按知识域模板把目标拆成可执行的计划项；时间不够时按「低频低分 → 已有基础 → 可合并」裁断"
+            action={
+              <Button variant="primary" size="sm" disabled={planBusy} onClick={() => void previewPlan()}>
+                {planBusy ? '处理中…' : '生成草案'}
+              </Button>
+            }
+          >
+            <div className="form-grid">
+              <Field label="目标类型">
+                <select value={template} onChange={(e) => setTemplate(e.target.value as GoalTemplate)}>
+                  {TEMPLATES.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            {planMsg && <p className="notice" style={{ marginTop: 10 }}>{planMsg}</p>}
+
+            {plan && (
+              <>
+                <div className="row" style={{ marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
+                  <span className={`pill tone-${VERDICT_TEXT[plan.result.verdict].tone}`}>
+                    {VERDICT_TEXT[plan.result.verdict].label}
+                  </span>
+                  <span className="muted mono">
+                    R {Number.isFinite(plan.result.ratio) ? plan.result.ratio.toFixed(2) : '∞'}
+                  </span>
+                  <span className="muted mono">
+                    需求 {(plan.result.demandMin / 60).toFixed(1)}h / 可用 {(plan.result.availableMin / 60).toFixed(1)}h
+                  </span>
+                  <span className="muted mono">{plan.result.weeksLeft} 周</span>
+                </div>
+
+                <div className="stack-tight" style={{ marginTop: 12 }}>
+                  {plan.result.stages.map((st) => (
+                    <div className="row" key={st.key} style={{ justifyContent: 'space-between' }}>
+                      <span className="muted">
+                        {STAGE_TEXT[st.key]} · {st.startDate} → {st.endDate}
+                      </span>
+                      <b className="mono">{(st.minutes / 60).toFixed(1)}h</b>
+                    </div>
+                  ))}
+                </div>
+
+                {plan.result.trimmed.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <span className="muted">被放弃项（{plan.result.trimmed.length}）</span>
+                    <ul className="bullets" style={{ marginTop: 6 }}>
+                      {plan.result.trimmed.slice(0, 6).map((t) => (
+                        <li key={t.id}>
+                          {t.title} · {REASON_TEXT[t.reason] ?? t.reason} · {Math.round(t.minutes / 60)}h
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {plan.result.warnings.length > 0 && (
+                  <ul className="bullets" style={{ marginTop: 10 }}>
+                    {plan.result.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="row" style={{ marginTop: 14 }}>
+                  <Button variant="primary" disabled={planBusy} onClick={() => void adoptPlan()}>
+                    采纳这份草案
+                  </Button>
+                  <span className="muted">会覆盖现有计划项</span>
+                </div>
+              </>
+            )}
           </Panel>
 
           <Panel title="调整目标" desc="修改后重新保存，判定与排程会同步更新">

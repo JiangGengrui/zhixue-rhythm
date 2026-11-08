@@ -87,7 +87,12 @@ class Cdp {
       target.click();
       return true;
     `);
-    if (!ok) fail(`找不到可点击元素：${text}`);
+    if (!ok) {
+      const labels = await this.eval(`
+        return [...document.querySelectorAll('button, a')].map((el) => el.textContent.trim()).filter(Boolean).slice(0, 24).join(' | ');
+      `);
+      fail(`找不到可点击元素：${text}；当前可用按钮：${labels}`);
+    }
     await sleep(600);
   }
 
@@ -143,6 +148,29 @@ async function main() {
 
   const origin = `http://127.0.0.1:${PORT}`;
   const base = `${origin}/app.html`;
+
+  /** 完成今日一项任务：旧 UI 是「开始→完成→填时长」，新 UI 待完成项直接「补录」 */
+  const completeOneTask = async (minutes = 100) => {
+    const labels = await cdp.eval(`
+      return [...document.querySelectorAll('button')].map((b) => b.textContent.trim());
+    `);
+    if (labels.includes('开始')) {
+      await cdp.click('开始');
+      await cdp.click('完成');
+      await cdp.eval(`
+        const input = document.querySelector('.inline-form input');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, '${minutes}');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      `);
+      await cdp.click('确认完成');
+    } else {
+      await cdp.click('补录');
+    }
+    await sleep(900);
+  };
 
   // 0. 根路径必须是产品主页，且「进入」指向学习空间
   await cdp.send('Page.navigate', { url: `${origin}/` });
@@ -205,6 +233,20 @@ async function main() {
   await cdp.shot('03-goal');
   console.log('✓ 目标与计划项写入成功');
 
+  // 3b. 智能拆解：生成草案 → 阶段与裁断结果可见（不采纳，避免覆盖示例数据）
+  await cdp.click('生成草案');
+  await sleep(1500);
+  body = await cdp.text();
+  assert(body.includes('基础') && body.includes('强化') && body.includes('冲刺'), '拆解草案缺少三阶段');
+  assert(body.includes('采纳这份草案'), '拆解草案缺少采纳入口');
+  assert(!body.includes('NaN'), '拆解草案出现 NaN');
+  const trimInfo = await cdp.eval(`
+    return { hasVerdict: /R\\s*[0-9]/.test(document.body.innerText), txt: document.body.innerText.length };
+  `);
+  assert(trimInfo.hasVerdict, '拆解草案缺少 R 值');
+  await cdp.shot('03b-decompose');
+  console.log('✓ 智能拆解草案生成正常');
+
   // 4. 周视图 → 生成本周计划
   await cdp.click('周视图');
   await sleep(500);
@@ -243,6 +285,18 @@ async function main() {
   await cdp.shot('04-week');
   console.log('✓ 周计划已生成并落库');
 
+  // 4b. 重排建议：评估 → 四个方案可见（含不适用/超载标记）
+  await cdp.click('评估是否需要重排');
+  await sleep(1500);
+  body = await cdp.text();
+  assert(body.includes('顺延') && body.includes('压缩') && body.includes('替代'), '重排方案未渲染');
+  const optCount = await cdp.eval(`return document.querySelectorAll('.opt-card').length;`);
+  assert(optCount === 4, `重排方案应有 4 个，实际 ${optCount}`);
+  await cdp.shot('04b-replan');
+  console.log('✓ 重排方案评估正常');
+  // 关掉方案面板，避免影响后续步骤的按钮查找
+  await cdp.eval(`window.scrollTo(0, 0); return true;`);
+
   // 4b. 调整任务时间（同周内移动）
   await cdp.click('调整');
   await sleep(500);
@@ -267,21 +321,9 @@ async function main() {
   // 5. 今日 → 完成一项任务（填写实际用时）
   await cdp.click('今日');
   await sleep(700);
-  await cdp.click('开始');
-  await cdp.click('完成');
-  const filled = await cdp.eval(`
-    const input = document.querySelector('.inline-form input');
-    if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, '100');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  `);
-  assert(filled, '完成表单未出现');
-  await cdp.click('确认完成');
-  await sleep(900);
+  await completeOneTask(100);
   body = await cdp.text();
-  assert(body.includes('已完成 · 实际'), '打卡后未显示完成状态与实际用时');
+  assert(body.includes('已完成'), '打卡后未显示完成状态');
   await cdp.shot('05-today-done');
   console.log('✓ 打卡与实际用时写入成功');
 
@@ -302,18 +344,7 @@ async function main() {
   await cdp.send('Network.emulateNetworkConditions', {
     offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
   });
-  await cdp.click('开始');
-  await cdp.click('完成');
-  await cdp.eval(`
-    const input = document.querySelector('.inline-form input');
-    if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, '30');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  `);
-  await cdp.click('确认完成');
-  await sleep(800);
+  await completeOneTask(30);
   body = await cdp.text();
   assert(body.includes('待同步'), '离线操作未进入队列');
   await cdp.shot('06b-offline');
@@ -407,7 +438,7 @@ async function main() {
   const before = await cdp.eval(`
     return {
       slots: document.querySelectorAll('.slot').length,
-      totals: [...document.querySelectorAll('.day header small')].map((el) => el.textContent).join('|'),
+      totals: [...document.querySelectorAll('.day-cap i')].map((el) => el.style.width).join('|'),
     };
   `);
   assert(before.slots > 0, '下一周生成后仍没有任务块');
@@ -421,7 +452,7 @@ async function main() {
   const after = await cdp.eval(`
     return {
       slots: document.querySelectorAll('.slot').length,
-      totals: [...document.querySelectorAll('.day header small')].map((el) => el.textContent).join('|'),
+      totals: [...document.querySelectorAll('.day-cap i')].map((el) => el.style.width).join('|'),
     };
   `);
   assert(after.slots === before.slots - 1, '删除后任务块数量未减少');
@@ -429,9 +460,11 @@ async function main() {
   await cdp.shot('08c-delete');
   console.log('✓ 删除任务块后当日合计同步更新');
 
-  // 9. 登出后回到登录页
-  await cdp.click('退出');
-  await sleep(900);
+  // 9. 登出后回到登录页（新 UI 的登出入口在「设置」页底部）
+  await cdp.click('设置');
+  await sleep(700);
+  await cdp.click('退出登录');
+  await sleep(1000);
   body = await cdp.text();
   assert(body.includes('登录') && !body.includes('达 成'), '登出后未回到登录页');
   await cdp.shot('08-logout');

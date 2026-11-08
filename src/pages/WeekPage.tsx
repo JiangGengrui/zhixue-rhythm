@@ -3,6 +3,7 @@ import { Button, Empty, Field, Meter, Panel } from '../components';
 import { packWeek } from '../domain/engine';
 import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import type { AppState, Actions } from '../store';
+import type { ReplanResponse } from '../data/api';
 
 const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -16,6 +17,9 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const [weekStart, setWeekStart] = useState(() => startOfWeek(todayISO(), state.settings.weekStart));
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [replanData, setReplanData] = useState<ReplanResponse | null>(null);
+  const [replanBusy, setReplanBusy] = useState(false);
+  const [replanMsg, setReplanMsg] = useState('');
   // 用户点过「生成」后不再展示预览，避免删空后预览块又冒出来
   const [everGenerated, setEverGenerated] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,6 +86,41 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
       setNotice(err instanceof Error ? err.message : '排程失败，请稍后重试');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function checkReplan() {
+    setReplanBusy(true);
+    setReplanMsg('正在评估…');
+    try {
+      const res = await actions.replan(weekStart);
+      setReplanData(res);
+      setReplanMsg(
+        res.blocked
+          ? '连续多次重排仍未达标，建议调整目标而不是继续排'
+          : res.trigger.triggered
+            ? '检测到需要调整的信号，下面是四个可选方案'
+            : '当前节奏正常，暂时不需要重排',
+      );
+    } catch (err) {
+      setReplanMsg(err instanceof Error ? err.message : '评估失败');
+    } finally {
+      setReplanBusy(false);
+    }
+  }
+
+  async function useOption(key: 'defer' | 'compress' | 'substitute' | 'drop', label: string) {
+    if (!confirm(`采用「${label}」？这一周未完成的任务块会被重新安排。`)) return;
+    setReplanBusy(true);
+    try {
+      const count = await actions.applyReplan(weekStart, key);
+      setReplanData(null);
+      setReplanMsg(`已采用「${label}」，这是本周第 ${count} 次重排`);
+      setNotice(`已应用「${label}」`);
+    } catch (err) {
+      setReplanMsg(err instanceof Error ? err.message : '应用失败');
+    } finally {
+      setReplanBusy(false);
     }
   }
 
@@ -238,6 +277,73 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
             );
           })}
         </div>
+      </Panel>
+
+      <Panel
+        title="重排建议"
+        desc="按「顺延 → 压缩 → 替代 → 放弃」给出方案，每个方案都标明代价与未来 7 天负载增幅"
+        action={
+          <Button variant="ghost" size="sm" disabled={replanBusy} onClick={() => void checkReplan()}>
+            {replanBusy ? '评估中…' : '评估是否需要重排'}
+          </Button>
+        }
+      >
+        {replanMsg && <p className="notice">{replanMsg}</p>}
+
+        {replanData && (
+          <>
+            <ul className="bullets" style={{ marginTop: 8 }}>
+              {replanData.trigger.reasons.map((r) => (
+                <li key={r.code}>
+                  <b>{r.label}</b> · {r.detail}
+                </li>
+              ))}
+              {replanData.trigger.reasons.length === 0 && <li>没有触发条件，保持当前节奏即可。</li>}
+            </ul>
+
+            {replanData.blocked && replanData.calibration && (
+              <div className="hint-bar" style={{ marginTop: 12 }}>
+                <span>{replanData.calibration}</span>
+              </div>
+            )}
+
+            {!replanData.blocked && (
+              <div className="opt-grid" style={{ marginTop: 14 }}>
+                {replanData.options.map((o) => {
+                  const off = !o.applicable || !o.feasible;
+                  return (
+                    <article key={o.key} className={`opt-card ${off ? 'is-off' : ''}`}>
+                      <h3>
+                        {o.label}
+                        {!o.applicable && <span className="pill tone-quiet">不适用</span>}
+                        {o.applicable && !o.feasible && <span className="pill tone-amber">超载</span>}
+                      </h3>
+                      <p className="muted">{o.reason}</p>
+                      <div className="meta">
+                        <span>新增 {o.summary.added}</span>
+                        <span>延期 {o.summary.deferred}</span>
+                        <span>放弃 {o.summary.dropped}</span>
+                        <span>
+                          负载 {o.loadIncreasePct >= 0 ? '+' : ''}
+                          {o.loadIncreasePct}%
+                        </span>
+                      </div>
+                      <p className="muted small">代价：{o.cost}</p>
+                      <Button
+                        variant={off ? 'quiet' : 'primary'}
+                        size="sm"
+                        disabled={off || replanBusy}
+                        onClick={() => void useOption(o.key, o.label)}
+                      >
+                        {off ? '当前不可用' : '采用这个方案'}
+                      </Button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
       </Panel>
 
       {noRoomLeft && isCurrentWeek && (

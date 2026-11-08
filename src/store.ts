@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from './data/api';
 import { enqueue, isOfflineError, loadOps, removeOp } from './data/offlineQueue';
-import type { SessionUser } from './data/api';
+import type { DecomposeResponse, ReplanOptionView, ReplanResponse, SessionUser } from './data/api';
 import { addDays, todayISO, weekDates } from './domain/date';
-import type { Block, BlockStatus, Goal, PlanItem, Settings } from './domain/types';
+import type { Block, BlockStatus, Goal, GoalTemplate, PlanItem, Settings } from './domain/types';
 
 export const defaultSettings: Settings = {
   weekStart: 1,
@@ -52,6 +52,12 @@ export interface Actions {
   moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /** 拆解预览（apply 时写库并刷新状态） */
+  decompose: (template: GoalTemplate, apply?: boolean) => Promise<DecomposeResponse>;
+  /** 重排方案（只读） */
+  replan: (week: string) => Promise<ReplanResponse>;
+  /** 应用重排方案并刷新状态 */
+  applyReplan: (week: string, option: ReplanOptionView['key']) => Promise<number>;
 }
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : '操作失败，请稍后重试');
@@ -353,6 +359,33 @@ export function useAppState() {
     await api.changePassword(currentPassword, newPassword);
   }, []);
 
+  const decompose = useCallback(
+    async (template: GoalTemplate, apply = false) => {
+      let res: DecomposeResponse | null = null;
+      await run(async () => {
+        res = await api.decompose(template, apply ? { apply: true, replace: true } : undefined);
+        if (apply) await load();
+      });
+      return res!;
+    },
+    [run, load],
+  );
+
+  const replan = useCallback(async (week: string) => api.replan(week), []);
+
+  const applyReplan = useCallback(
+    async (week: string, option: ReplanOptionView['key']) => {
+      let count = 0;
+      await run(async () => {
+        const res = await api.applyReplan(week, option);
+        count = res.replanCount;
+        await load();
+      });
+      return count;
+    },
+    [run, load],
+  );
+
   const deleteAccount = useCallback(async (password: string) => {
     await api.deleteAccount(password);
     setState(emptyState);
@@ -368,7 +401,7 @@ export function useAppState() {
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
-      moveBlock, deleteBlock, changePassword, flushOps,
+      moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan,
     } satisfies Actions,
   };
 }
