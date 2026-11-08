@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Field, Panel, Stat, ThemeToggle } from '../components';
 import { api } from '../data/api';
 import type { Settings } from '../domain/types';
@@ -215,6 +215,8 @@ export function SettingsPage({
               {delMsg && <span className="warn">{delMsg}</span>}
             </div>
           </Panel>
+
+          {state.user?.isAdmin && <FeedbackAdmin />}
         </div>
 
         <div className="col">
@@ -255,5 +257,54 @@ export function SettingsPage({
         </div>
       </div>
     </div>
+  );
+}
+
+
+function FeedbackAdmin() {
+  const [items, setItems] = useState<
+    Array<{ id: number; nickname: string | null; content: string; createdAt: string; hidden: boolean }>
+  >([]);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api
+      .adminFeedback()
+      .then((res) => setItems(res.items))
+      .catch((err: unknown) => setMsg(err instanceof Error ? err.message : '加载失败'));
+  }, []);
+
+  async function toggle(id: number, restore: boolean) {
+    try {
+      await api.setFeedbackHidden(id, restore);
+      const res = await api.adminFeedback();
+      setItems(res.items);
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : '操作失败');
+    }
+  }
+
+  return (
+    <Panel title="留言管理" desc="主页留言板的公开内容；隐藏后访客不可见，可恢复。">
+      {msg && <p className="notice">{msg}</p>}
+      {items.length === 0 ? (
+        <p style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>暂无留言。</p>
+      ) : (
+        <ul className="bullets">
+          {items.map((f) => (
+            <li key={f.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <span style={{ flex: 1 }}>
+                <b style={{ fontSize: 12.5 }}>{f.nickname || '匿名'}</b>
+                <span style={{ fontSize: 12.5 }}>：{f.content}</span>
+                {f.hidden && <span className="pill tone-amber">已隐藏</span>}
+              </span>
+              <Button variant="quiet" size="sm" onClick={() => void toggle(f.id, f.hidden)}>
+                {f.hidden ? '恢复' : '隐藏'}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }

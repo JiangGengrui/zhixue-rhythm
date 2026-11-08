@@ -60,7 +60,7 @@ export function currentUser(db, req) {
   if (!token) return null;
   const row = db
     .prepare(
-      'SELECT s.token, s.expires_at, u.id, u.email, u.name, u.week_start, u.weekdays FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+      'SELECT s.token, s.expires_at, u.id, u.email, u.name, u.week_start, u.weekdays, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
     )
     .get(token);
   if (!row) return null;
@@ -73,6 +73,7 @@ export function currentUser(db, req) {
     email: row.email,
     name: row.name,
     token,
+    isAdmin: !!row.is_admin,
     settings: {
       weekStart: row.week_start === 0 ? 0 : 1,
       weekdays: safeWeekdays(row.weekdays),

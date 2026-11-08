@@ -74,6 +74,8 @@ export interface SessionUser {
   id: string;
   name: string;
   email: string;
+  /** 管理员（首个注册用户）：可管理主页留言 */
+  isAdmin?: boolean;
 }
 
 export interface ServerState {
@@ -119,6 +121,12 @@ export const api = {
     }>('GET', '/api/notifications'),
   markNotificationsRead: (ids: 'all' | number[]) =>
     request<{ ok: true }>('POST', '/api/notifications/read', { ids }),
+  adminFeedback: () =>
+    request<{
+      items: Array<{ id: number; nickname: string | null; content: string; createdAt: string; hidden: boolean }>;
+    }>('GET', '/api/feedback/admin'),
+  setFeedbackHidden: (id: number, restore: boolean) =>
+    request<{ ok: true; hidden: boolean }>('DELETE', `/api/feedback/${id}?restore=${restore}`),
   deleteAccount: (password: string) => request<{ ok: true }>('DELETE', '/api/account', { password }),
   putSettings: (settings: Settings) =>
     request<{ settings: Settings }>('PUT', '/api/settings', settings),

@@ -121,6 +121,22 @@ function migrate(db) {
     db.exec('ALTER TABLE users ADD COLUMN recovery_hash TEXT');
   }
 
+  const userCols0 = db.prepare('PRAGMA table_info(users)').all();
+  if (!userCols0.some((c) => c.name === 'is_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+    // 迁移收口：若还没有管理员，把最早的注册用户提为管理员
+    const anyAdmin = db.prepare('SELECT COUNT(*) AS c FROM users WHERE is_admin = 1').get();
+    if (!anyAdmin.c) {
+      const first = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+      if (first) db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(first.id);
+    }
+  }
+
+  const fbCols = db.prepare('PRAGMA table_info(feedback)').all();
+  if (!fbCols.some((c) => c.name === 'hidden')) {
+    db.exec('ALTER TABLE feedback ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+  }
+
   const blockCols = db.prepare('PRAGMA table_info(blocks)').all();
   if (!blockCols.some((c) => c.name === 'source')) {
     db.exec("ALTER TABLE blocks ADD COLUMN source TEXT"); // plan | backfill

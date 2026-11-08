@@ -25,9 +25,13 @@ async function call(method, path, body, cookie) {
   return { status: res.status, json, cookie: setCookie ? setCookie.split(';')[0] : null };
 }
 
+/** 全库首个注册用户即管理员（迁移规则），记录其会话供管理类测试使用 */
+const adminSession = { cookie: null };
+
 async function register(email, name = '测试用户') {
   const r = await call('POST', '/api/auth/register', { email, password: 'password123', name });
   assert.equal(r.status, 200, JSON.stringify(r.json));
+  if (!adminSession.cookie) adminSession.cookie = r.cookie;
   return { cookie: r.cookie, user: r.json.user };
 }
 
@@ -421,6 +425,43 @@ test('拆解草案可编辑：apply 时以提交的 items 为准', async () => {
   assert.deepEqual(titles, ['数学一刷（改过）', '408 强化']);
   assert.equal(state.json.items[0].estimateMin, 90);
   assert.equal(state.json.items[0].remainingMin, 90);
+});
+
+test('留言管理：首个注册用户为管理员，可隐藏/恢复，公开列表排除隐藏', async () => {
+  // 管理员 = 全库首个注册用户（register 已记录）
+  const a = await register('mod-a@test.dev');
+  const b = await register('mod-b@test.dev');
+  const admin = { cookie: adminSession.cookie };
+  const guest = a.cookie === adminSession.cookie ? b : a;
+  const meAdmin = await call('GET', '/api/me', null, admin.cookie);
+  console.error('[debug] meAdmin:', JSON.stringify(meAdmin.json.user), '| adminCookie:', String(admin.cookie).slice(0, 24));
+  assert.equal(meAdmin.json.user.isAdmin, true, '首个注册用户应为管理员');
+
+  // 各留一条言
+  await call('POST', '/api/feedback', { nickname: '访客A', content: '正常留言' }, a.cookie);
+  await call('POST', '/api/feedback', { nickname: '访客B', content: '垃圾留言' }, b.cookie);
+
+  // 非管理员无权管理
+  const forbidden = await call('GET', '/api/feedback/admin', null, guest.cookie);
+  assert.equal(forbidden.status, 403);
+
+  // 管理员看到全部并隐藏垃圾留言
+  const list = await call('GET', '/api/feedback/admin', null, admin.cookie);
+  assert.equal(list.status, 200);
+  const spam = list.json.items.find((f) => f.content === '垃圾留言');
+  assert.ok(spam);
+  const hide = await call('DELETE', `/api/feedback/${spam.id}`, { restore: false }, admin.cookie);
+  assert.equal(hide.status, 200);
+
+  // 公开列表不再显示隐藏留言
+  const pub = await call('GET', '/api/feedback?limit=20');
+  assert.ok(!JSON.stringify(pub.json.messages).includes('垃圾留言'), '隐藏后公开列表不应包含');
+
+  // 恢复
+  const restore = await call('DELETE', `/api/feedback/${spam.id}?restore=true`, {}, admin.cookie);
+  assert.equal(restore.status, 200);
+  const pub2 = await call('GET', '/api/feedback?limit=20');
+  assert.ok(JSON.stringify(pub2.json.messages).includes('垃圾留言'));
 });
 
 test('导出：JSON 完整快照与 CSV 任务记录', async () => {

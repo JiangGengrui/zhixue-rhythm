@@ -121,7 +121,12 @@ export function createApi(db) {
     sessionsOfUser: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
     updatePassword: db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?'),
     insertFeedback: db.prepare('INSERT INTO feedback (nickname, content, created_at) VALUES (?, ?, ?)'),
-    recentFeedback: db.prepare('SELECT id, nickname, content, created_at FROM feedback ORDER BY id DESC LIMIT ?'),
+    recentFeedback: db.prepare('SELECT id, nickname, content, created_at FROM feedback WHERE hidden = 0 ORDER BY id DESC LIMIT ?'),
+    adminFeedback: db.prepare('SELECT id, nickname, content, created_at, hidden FROM feedback ORDER BY id DESC LIMIT 50'),
+    hideFeedback: db.prepare('UPDATE feedback SET hidden = 1 WHERE id = ?'),
+    showFeedback: db.prepare('UPDATE feedback SET hidden = 0 WHERE id = ?'),
+    feedbackById: db.prepare('SELECT * FROM feedback WHERE id = ?'),
+    adminCount: db.prepare('SELECT COUNT(*) AS c FROM users WHERE is_admin = 1'),
     bumpVisit: db.prepare("INSERT INTO site_stats (key, value) VALUES ('visit', 1) ON CONFLICT(key) DO UPDATE SET value = value + 1"),
     readVisit: db.prepare("SELECT value FROM site_stats WHERE key = 'visit'"),
     blocksByDate: db.prepare('SELECT * FROM blocks WHERE user_id = ? AND date = ?'),
@@ -172,7 +177,7 @@ export function createApi(db) {
     const items = q.itemsByUser.all(user.id).map(normalizeItem);
     const blocks = q.blocksByUser.all(user.id).map(normalizeBlock);
     return {
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, email: user.email, isAdmin: !!user.isAdmin },
       goal,
       items,
       blocks,
@@ -191,16 +196,18 @@ export function createApi(db) {
       if (q.userByEmail.get(email)) throw new HttpError(409, 'E4001', '该邮箱已注册');
 
       const id = newId('usr');
+      const becomeAdmin = q.adminCount.get().c === 0;
       const recoveryCode = generateRecoveryCode();
       q.insertUser.run(
         id, email, name, hashPassword(password), hashRecoveryCode(recoveryCode),
         '[0,150,150,150,150,150,120]', nowISO(),
       );
+      if (becomeAdmin) db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(id);
       const user = q.userById.get(id);
       const { token } = createSession(db, id);
       res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
       // 恢复码只在此刻明文返回一次，服务端只存哈希
-      return { user: { id: user.id, name: user.name, email: user.email }, recoveryCode };
+      return { user: { id: user.id, name: user.name, email: user.email, isAdmin: becomeAdmin }, recoveryCode };
     },
 
     'POST /api/auth/login': ({ body, res, ip }) => {
@@ -244,7 +251,7 @@ export function createApi(db) {
       return { ok: true };
     },
 
-    'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email } }),
+    'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email, isAdmin: !!user.isAdmin } }),
 
     // 站内通知：拉取时先跑一遍预警规则（同类别同日只落一条），再返回列表与未读数
     'GET /api/notifications': ({ user }) => {
@@ -483,6 +490,22 @@ export function createApi(db) {
     },
 
     'GET /api/visit': () => ({ count: q.readVisit.get()?.value ?? 0 }),
+
+    // 留言管理：仅管理员
+    'GET /api/feedback/admin': ({ user }) => {
+      if (!user.isAdmin) throw new HttpError(403, 'E2005', '仅管理员可以管理留言');
+      return {
+        items: q.adminFeedback.all().map((row) => ({
+          id: row.id,
+          nickname: row.nickname,
+          content: row.content,
+          createdAt: row.created_at,
+          hidden: !!row.hidden,
+        })),
+      };
+    },
+
+
 
     'POST /api/visit': () => {
       q.bumpVisit.run();
@@ -767,6 +790,18 @@ export function createApi(db) {
       q.deleteBlocksOfItem.run(item.id, user.id);
       q.deleteItem.run(item.id, user.id);
       return { ok: true };
+    }
+
+    const feedbackMatch = path.match(/^\/api\/feedback\/(\d+)$/);
+    if (feedbackMatch) {
+      const user = requireUser(ctx);
+      if (!user.isAdmin) throw new HttpError(403, 'E2005', '仅管理员可以管理留言');
+      const row = q.feedbackById.get(Number(feedbackMatch[1]));
+      if (!row) throw notFound();
+      const restore = ctx.query?.get('restore') === 'true' || ctx.body?.restore === true;
+      if (restore) q.showFeedback.run(row.id);
+      else q.hideFeedback.run(row.id);
+      return { ok: true, hidden: !restore };
     }
 
     const blockMatch = path.match(/^\/api\/blocks\/([\w-]+)$/);

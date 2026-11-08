@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         home: page('./index.html'),
         app: page('./app.html'),
+        privacy: page('./privacy.html'),
       },
     },
   },
