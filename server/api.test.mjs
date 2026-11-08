@@ -354,6 +354,75 @@ test('通知中心：预警生成、同日去重、全部已读', async () => {
   assert.equal(anon.status, 401);
 });
 
+test('任务锁定：锁定块在重建与重排中保留，且禁止移动', async () => {
+  const { cookie } = await register('lock@test.dev');
+  await call('PUT', '/api/goal', { title: 'g', deadline: '2027-05-01', weeklyMinutes: 900, level: 'once' }, cookie);
+  for (const t of ['A', 'B']) {
+    await call('POST', '/api/items', { title: t, subject: 'major', estimateMin: 120, weight: 4 }, cookie);
+  }
+  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09' }, cookie);
+  assert.ok(gen.json.blocks.length >= 2);
+  const [first, second] = gen.json.blocks;
+
+  // 锁定第一块
+  const locked = await call('PATCH', `/api/blocks/${first.id}`, { locked: true }, cookie);
+  assert.equal(locked.json.block.locked, true);
+
+  // 锁定块禁止移动
+  const moved = await call('PATCH', `/api/blocks/${first.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
+  assert.equal(moved.status, 400);
+  assert.equal(moved.json.error.code, 'E1038');
+
+  // 整周重建：锁定块保留，未锁定块被重排
+  const rebuilt = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09', mode: 'rebuild' }, cookie);
+  const keptLock = rebuilt.json.blocks.find((b) => b.id === first.id);
+  assert.ok(keptLock, '重建后锁定块应保留');
+  assert.equal(keptLock.date, first.date);
+  assert.equal(keptLock.startMin, first.startMin);
+
+  // 重排应用：锁定块时间不变
+  const applied = await call('POST', '/api/plan/replan/apply', { week: '2026-11-09', option: 'defer' }, cookie);
+  assert.equal(applied.status, 200, JSON.stringify(applied.json));
+  const keptLock2 = applied.json.blocks.find((b) => b.id === first.id);
+  assert.ok(keptLock2, '重排后锁定块应保留');
+  assert.equal(keptLock2.startMin, first.startMin);
+
+  // 解锁后可以移动
+  await call('PATCH', `/api/blocks/${second.id}`, { locked: false }, cookie);
+  const unlockedMove = await call('PATCH', `/api/blocks/${second.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
+  assert.equal(unlockedMove.status, 200);
+});
+
+test('拆解草案可编辑：apply 时以提交的 items 为准', async () => {
+  const { cookie } = await register('draft@test.dev');
+  await call('PUT', '/api/goal', { title: '考研', deadline: '2027-05-01', weeklyMinutes: 900, level: 'once' }, cookie);
+
+  // 非法科目被拒
+  const bad = await call('POST', '/api/goal/decompose', {
+    template: 'postgrad-cs', apply: true, replace: true,
+    items: [{ title: '数学', subject: 'music', estimateMin: 60, weight: 3 }],
+  }, cookie);
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.error.code, 'E1041');
+
+  // 编辑后的草案：改标题、砍工时、只保留两条
+  const ok = await call('POST', '/api/goal/decompose', {
+    template: 'postgrad-cs', apply: true, replace: true,
+    items: [
+      { title: '数学一刷（改过）', subject: 'math', estimateMin: 90, weight: 5 },
+      { title: '408 强化', subject: 'major', estimateMin: 60, weight: 4 },
+    ],
+  }, cookie);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.applied, 2);
+
+  const state = await call('GET', '/api/state', null, cookie);
+  const titles = state.json.items.map((i) => i.title);
+  assert.deepEqual(titles, ['数学一刷（改过）', '408 强化']);
+  assert.equal(state.json.items[0].estimateMin, 90);
+  assert.equal(state.json.items[0].remainingMin, 90);
+});
+
 test('导出：JSON 完整快照与 CSV 任务记录', async () => {
   const { cookie } = await register('export@test.dev');
   await call('PUT', '/api/goal', { title: '导出目标', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);

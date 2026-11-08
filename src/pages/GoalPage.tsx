@@ -36,6 +36,9 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
   const [notice, setNotice] = useState('');
   const [template, setTemplate] = useState<GoalTemplate>('postgrad-cs');
   const [plan, setPlan] = useState<DecomposeResponse | null>(null);
+  const [draftRows, setDraftRows] = useState<
+    Array<{ key: string; title: string; subject: string; estimateMin: number; weight: number; included: boolean }>
+  >([]);
   const [planBusy, setPlanBusy] = useState(false);
   const [planMsg, setPlanMsg] = useState('');
 
@@ -114,6 +117,16 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
     try {
       const res = await actions.decompose(template);
       setPlan(res);
+      setDraftRows(
+        res.result.items.map((i) => ({
+          key: i.key,
+          title: i.title,
+          subject: i.subject,
+          estimateMin: i.estimateMin,
+          weight: i.weight,
+          included: true,
+        })),
+      );
       setPlanMsg(`已生成 ${res.result.items.length} 个计划项草案`);
     } catch (err) {
       setPlanMsg(err instanceof Error ? err.message : '拆解失败');
@@ -124,14 +137,24 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
 
   async function adoptPlan() {
     if (!plan) return;
+    const chosen = draftRows.filter((r) => r.included);
+    if (chosen.length === 0) {
+      setPlanMsg('至少保留一条计划项：取消勾选的不会写入。');
+      return;
+    }
+    const minutes = chosen.reduce((sum, r) => sum + r.estimateMin, 0);
     const ok = confirm(
-      `将用 ${plan.result.items.length} 条计划项替换现有的 ${items.length} 条，并清空已排任务块。确定吗？`,
+      `将用 ${chosen.length} 条计划项（共 ${(minutes / 60).toFixed(1)} 小时）替换现有的 ${items.length} 条，并清空已排任务块。确定吗？`,
     );
     if (!ok) return;
     setPlanBusy(true);
     setPlanMsg('正在写入…');
     try {
-      const res = await actions.decompose(template, true);
+      const res = await actions.decompose(
+        template,
+        true,
+        chosen.map((r) => ({ title: r.title.trim() || r.key, subject: r.subject, estimateMin: Math.round(r.estimateMin), weight: r.weight })),
+      );
       setPlan(res);
       setPlanMsg(`已写入 ${res.applied} 条计划项，去「周视图」生成这一周的计划`);
     } catch (err) {
@@ -418,6 +441,70 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
                       <b className="mono">{(st.minutes / 60).toFixed(1)}h</b>
                     </div>
                   ))}
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <span className="muted">
+                      计划项草案（{draftRows.filter((r) => r.included).length}/{draftRows.length}）
+                    </span>
+                    <span className="muted">可改工时 / 权重，取消勾选即放弃该项</span>
+                  </div>
+                  <div className="draft-list">
+                    {draftRows.map((row, index) => (
+                      <div key={row.key} className={`draft-row ${row.included ? '' : 'is-off'}`}>
+                        <label className="draft-check">
+                          <input
+                            type="checkbox"
+                            checked={row.included}
+                            onChange={(e) =>
+                              setDraftRows((prev) =>
+                                prev.map((r, i) => (i === index ? { ...r, included: e.target.checked } : r)),
+                              )
+                            }
+                          />
+                        </label>
+                        <input
+                          className="draft-title"
+                          value={row.title}
+                          onChange={(e) =>
+                            setDraftRows((prev) =>
+                              prev.map((r, i) => (i === index ? { ...r, title: e.target.value } : r)),
+                            )
+                          }
+                        />
+                        <input
+                          className="draft-min"
+                          type="number"
+                          min={5}
+                          step={5}
+                          value={row.estimateMin}
+                          onChange={(e) =>
+                            setDraftRows((prev) =>
+                              prev.map((r, i) =>
+                                i === index ? { ...r, estimateMin: Math.max(5, Number(e.target.value) || 5) } : r,
+                              ),
+                            )
+                          }
+                        />
+                        <select
+                          className="draft-weight"
+                          value={row.weight}
+                          onChange={(e) =>
+                            setDraftRows((prev) =>
+                              prev.map((r, i) => (i === index ? { ...r, weight: Number(e.target.value) } : r)),
+                            )
+                          }
+                        >
+                          {[5, 4, 3, 2, 1].map((w) => (
+                            <option key={w} value={w}>
+                              权重 {w}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {plan.result.trimmed.length > 0 && (

@@ -1369,3 +1369,21 @@ input[type='time'] { font-family: var(--mono); font-size: 12.5px; }
 .notif-body b { display: block; font-size: 13px; margin-bottom: 3px; }
 .notif-body p { margin: 0; font-size: 12px; color: var(--ink-2); line-height: 1.65; }
 .notif-body time { display: block; font-size: 10.5px; color: var(--ink-3); margin-top: 4px; font-family: var(--mono); }
+
+/* ── 拆解草案编辑 ── */
+.draft-list { display: grid; gap: 6px; margin-top: 8px; max-height: 340px; overflow: auto; }
+.draft-row {
+  display: grid; grid-template-columns: 24px 1fr 86px 92px; gap: 8px; align-items: center;
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px;
+}
+.draft-row.is-off { opacity: 0.45; }
+.draft-check { display: grid; place-items: center; }
+.draft-check input { accent-color: var(--mint); }
+.draft-title {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  border-radius: 8px; padding: 6px 9px; font-size: 12.5px; min-width: 0;
+}
+.draft-min, .draft-weight {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  border-radius: 8px; padding: 6px 8px; font-size: 12px;
+}

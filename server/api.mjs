@@ -87,6 +87,7 @@ function normalizeBlock(row) {
     progressPct: row.progress_pct ?? undefined,
     accumulatedSec: row.accumulated_sec ?? 0,
     startedAt: row.started_at ?? undefined,
+    locked: !!(row.locked ?? 0),
   };
 }
 
@@ -140,7 +141,8 @@ export function createApi(db) {
     markAllRead: db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL"),
     markRead: db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?'),
     notifById: db.prepare('SELECT * FROM notifications WHERE id = ? AND user_id = ?'),
-    deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done'"),
+    deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done' AND locked = 0"),
+    setLocked: db.prepare('UPDATE blocks SET locked = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     clearItems: db.prepare('DELETE FROM items WHERE user_id = ?'),
     clearBlocks: db.prepare('DELETE FROM blocks WHERE user_id = ?'),
     setRemaining: db.prepare('UPDATE items SET remaining_min = ? WHERE id = ? AND user_id = ?'),
@@ -309,12 +311,27 @@ export function createApi(db) {
         throw new HttpError(409, 'E4009', '已有计划项，覆盖前请确认（replace=true）');
       }
 
+      // 用户在预览里编辑过草案时，以编辑后的列表为准（字段逐一校验）
+      let drafts = result.items;
+      if (Array.isArray(body?.items)) {
+        drafts = body.items.map((raw, index) => {
+          const title = String(raw?.title ?? '').trim();
+          assert(title.length >= 1 && title.length <= 60, 'E1040', `第 ${index + 1} 项标题需为 1–60 字`);
+          const estimateMin = int(raw?.estimateMin, `第 ${index + 1} 项预估工时`, 5, 1440);
+          const weight = int(raw?.weight ?? 3, `第 ${index + 1} 项权重`, 1, 5);
+          const subject = String(raw?.subject ?? 'other');
+          assert(SUBJECTS.has(subject), 'E1041', `第 ${index + 1} 项科目不合法`);
+          return { title, subject, estimateMin, weight };
+        });
+        assert(drafts.length > 0, 'E1042', '至少保留一条计划项');
+      }
+
       db.exec('BEGIN');
       try {
         q.clearBlocks.run(user.id);
         q.clearItems.run(user.id);
         const now = nowISO();
-        for (const draft of result.items) {
+        for (const draft of drafts) {
           q.insertItem.run(
             newId('item'), user.id, goal.id, draft.title, draft.subject,
             draft.estimateMin, draft.estimateMin, draft.weight, now,
@@ -325,7 +342,7 @@ export function createApi(db) {
         db.exec('ROLLBACK');
         throw err;
       }
-      return { result, applied: result.items.length };
+      return { result, applied: drafts.length };
     },
 
     // 重排：只给方案，不写库；写库走 /api/plan/replan/apply
@@ -370,9 +387,25 @@ export function createApi(db) {
       const state = stateOf(user);
       const replanCount = q.countReplan.get(user.id, weekStart).c;
 
+      // 锁定块不参与重排：从方案输入中剔除，其占用的工时也从任务剩余量里扣除，
+      // 否则同一条任务会被「保留的锁定块 + 重新生成的块」重复规划（block id 还会冲突）
+      const lockedWeek = state.blocks.filter(
+        (b) => b.locked && b.date >= weekStart && b.date <= weekEnd && b.status !== 'done',
+      );
+      const lockedIds = new Set(lockedWeek.map((b) => b.id));
+      const lockedMinByItem = new Map();
+      for (const b of lockedWeek) {
+        lockedMinByItem.set(b.itemId, (lockedMinByItem.get(b.itemId) ?? 0) + (b.endMin - b.startMin));
+      }
+      const itemsForPlan = state.items.map((i) => {
+        const lockedMin = lockedMinByItem.get(i.id);
+        if (!lockedMin) return i;
+        const rest = Math.max(0, (i.remainingMin ?? i.estimateMin) - lockedMin);
+        return { ...i, remainingMin: rest, estimateMin: rest };
+      });
       const plan = planReplan({
-        blocks: state.blocks,
-        items: state.items,
+        blocks: state.blocks.filter((b) => !lockedIds.has(b.id)),
+        items: itemsForPlan,
         settings: state.settings,
         weekStart,
         today: todayISO(),
@@ -393,6 +426,7 @@ export function createApi(db) {
       db.exec('BEGIN');
       try {
         q.deletePendingWeek.run(user.id, weekStart, weekEnd);
+        // 锁定块未被 deletePendingWeek 删除，仍在表里；只写回方案生成的块
         for (const block of option.blocks) {
           q.insertBlock.run(
             block.id, user.id, block.itemId, block.date, block.startMin, block.endMin,
@@ -766,8 +800,15 @@ export function createApi(db) {
     const block = q.blockById.get(id, user.id);
     if (!block) throw notFound();
 
-    // 移动：改日期/开始时间，时长保持不变
+    // 锁定 / 解锁：锁定的块不会被重排或重建改动，也不能移动
+    if (body && typeof body.locked === 'boolean') {
+      q.setLocked.run(body.locked ? 1 : 0, nowISO(), id, user.id);
+      return { block: normalizeBlock(q.blockById.get(id, user.id)) };
+    }
+
+    // 移动：改日期/开始时间，时长保持不变；锁定块禁止移动
     if (body && (body.date !== undefined || body.startMin !== undefined)) {
+      if (block.locked) throw bad('E1038', '任务已锁定，请先解锁再调整时间');
       const date = dateStr(body.date ?? block.date, '日期');
       const start = int(body.startMin ?? block.start_min, '开始时间', 0, 1439);
       const duration = block.end_min - block.start_min;

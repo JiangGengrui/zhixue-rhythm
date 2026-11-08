@@ -73,6 +73,8 @@ export interface Block {
   accumulatedSec?: number;
   /** 当前一段执行的开始时间（ISO）。status=running 且该字段为空表示处于暂停 */
   startedAt?: string;
+  /** 用户锁定：重排 / 重建 / 移动都不会改动它 */
+  locked?: boolean;
 }
 
 export interface Settings {

@@ -262,6 +262,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
                           <small>
                             {fmtHM(b.startMin)} · {fmtDuration(b.endMin - b.startMin)}
                             {b.isBuffer ? ' · 弹性' : ''}
+                            {b.locked ? ' · 🔒' : ''}
                           </small>
                           {movable && (
                             <button type="button" className="slot-edit" onClick={() => startEdit(b.id)}>
@@ -378,6 +379,9 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           title="调整任务时间"
           desc={`${itemMap.get(editing.itemId)?.title ?? '任务'} · 时长 ${fmtDuration(editing.endMin - editing.startMin)}（不可在此修改）`}
         >
+          {editing.locked && (
+            <p className="notice">🔒 已锁定：重排、重建都不会改动这个时间；解锁后才能调整。</p>
+          )}
           <div className="form-grid">
             <Field label="日期">
               <select value={editDate} onChange={(e) => setEditDate(e.target.value)}>
@@ -407,6 +411,18 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
               }}
             >
               保存
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setEditError('');
+                void actions
+                  .setBlockLocked(editing.id, !editing.locked)
+                  .then(() => setNotice(editing.locked ? '已解锁' : '已锁定：重排与重建都会保留这个时间'))
+                  .catch((err: unknown) => setEditError(err instanceof Error ? err.message : '操作失败'));
+              }}
+            >
+              {editing.locked ? '解锁' : '锁定此时间'}
             </Button>
             <Button
               variant="danger"

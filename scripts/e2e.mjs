@@ -337,6 +337,17 @@ async function main() {
   assert(body.includes('已调整任务时间'), '调整后未提示成功');
   assert(body.includes('06:00'), '调整后的时间未显示');
   await cdp.shot('04b-week-moved');
+
+  // 4c. 锁定该任务块：重排与重建都保留
+  await cdp.click('调整');
+  await sleep(500);
+  await cdp.click('锁定此时间');
+  await sleep(800);
+  body = await cdp.text();
+  assert(body.includes('已锁定'), '锁定后未提示');
+  assert(body.includes('🔒'), '锁定块未显示 🔒 标记');
+  await cdp.shot('04c-locked');
+  console.log('✓ 任务块锁定正常');
   console.log('✓ 任务块同周移动成功');
 
   // 5. 今日 → 完成一项任务（填写实际用时）
@@ -454,6 +465,8 @@ async function main() {
   body = await cdp.text();
   assert(!body.includes('NaN'), '按新容量重新生成后出现 NaN');
   console.log('✓ 按新容量重新生成正常');
+  assert(await cdp.eval(`return document.body.innerText.includes('🔒');`), '重排后锁定块标记丢失');
+  console.log('✓ 重建/重排保留锁定块');
 
   // 8b. 翻到下一周：未生成的周应为空状态，而不是复用同一份课表
   await cdp.click('›');

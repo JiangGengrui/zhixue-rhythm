@@ -134,6 +134,9 @@ function migrate(db) {
   if (!blockCols.some((c) => c.name === 'started_at')) {
     db.exec('ALTER TABLE blocks ADD COLUMN started_at TEXT'); // 当前一段执行的开始时间；NULL=未在计时
   }
+  if (!blockCols.some((c) => c.name === 'locked')) {
+    db.exec('ALTER TABLE blocks ADD COLUMN locked INTEGER NOT NULL DEFAULT 0'); // 用户锁定：重排/重建时保留
+  }
 
   const cols = db.prepare('PRAGMA table_info(items)').all();
   if (!cols.some((c) => c.name === 'remaining_min')) {

@@ -133,8 +133,15 @@ export const api = {
     request<{ block: Block }>('PATCH', `/api/blocks/${id}`, input),
   deleteBlock: (id: string) => request<{ ok: true }>('DELETE', `/api/blocks/${id}`),
   decomposeTemplates: () => request<{ templates: TemplateInfo[] }>('GET', '/api/decompose/templates'),
-  decompose: (template: GoalTemplate, options?: { apply?: boolean; replace?: boolean }) =>
-    request<DecomposeResponse>('POST', '/api/goal/decompose', { template, ...options }),
+  decompose: (
+    template: GoalTemplate,
+    options?: {
+      apply?: boolean;
+      replace?: boolean;
+      /** 用户编辑后的草案；apply 时以它为准 */
+      items?: Array<{ title: string; subject: string; estimateMin: number; weight: number }>;
+    },
+  ) => request<DecomposeResponse>('POST', '/api/goal/decompose', { template, ...options }),
   replan: (week: string, manual = true) =>
     request<ReplanResponse>('GET', `/api/plan/replan?week=${week}${manual ? '&manual=1' : ''}`),
   applyReplan: (week: string, option: ReplanOptionView['key']) =>
@@ -154,6 +161,7 @@ export const api = {
       progressPct?: number;
       source?: 'plan' | 'backfill';
       action?: 'pause' | 'resume';
+      locked?: boolean;
     },
     opId?: string,
   ) =>

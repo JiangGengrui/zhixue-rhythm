@@ -55,11 +55,16 @@ export interface Actions {
   loadNotifications: () => Promise<void>;
   markNotificationsRead: () => Promise<void>;
   resumeBlock: (id: string) => Promise<void>;
+  setBlockLocked: (id: string, locked: boolean) => Promise<void>;
   moveBlock: (id: string, input: { date: string; startMin: number }) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** 拆解预览（apply 时写库并刷新状态） */
-  decompose: (template: GoalTemplate, apply?: boolean) => Promise<DecomposeResponse>;
+  decompose: (
+    template: GoalTemplate,
+    apply?: boolean,
+    items?: Array<{ title: string; subject: string; estimateMin: number; weight: number }>,
+  ) => Promise<DecomposeResponse>;
   /** 重排方案（只读） */
   replan: (week: string) => Promise<ReplanResponse>;
   /** 应用重排方案并刷新状态 */
@@ -336,6 +341,31 @@ export function useAppState() {
     [state.blocks],
   );
 
+  const setBlockLocked = useCallback(
+    async (id: string, locked: boolean) => {
+      const before = state.blocks.find((b) => b.id === id);
+      setState((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) => (b.id === id ? { ...b, locked } : b)),
+      }));
+      try {
+        const res = await api.patchBlock(id, { locked });
+        setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? res.block : b)) }));
+        setError(null);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          setPhase('guest');
+          return;
+        }
+        setError(messageOf(err));
+        if (before) {
+          setState((prev) => ({ ...prev, blocks: prev.blocks.map((b) => (b.id === id ? before : b)) }));
+        }
+      }
+    },
+    [state.blocks],
+  );
+
   const moveBlock = useCallback(
     async (id: string, input: { date: string; startMin: number }) => {
       const before = state.blocks.find((b) => b.id === id);
@@ -456,10 +486,17 @@ export function useAppState() {
   }, []);
 
   const decompose = useCallback(
-    async (template: GoalTemplate, apply = false) => {
+    async (
+      template: GoalTemplate,
+      apply = false,
+      items?: Array<{ title: string; subject: string; estimateMin: number; weight: number }>,
+    ) => {
       let res: DecomposeResponse | null = null;
       await run(async () => {
-        res = await api.decompose(template, apply ? { apply: true, replace: true } : undefined);
+        res = await api.decompose(
+          template,
+          apply ? { apply: true, replace: true, items } : undefined,
+        );
         if (apply) await load();
       });
       return res!;
@@ -498,7 +535,7 @@ export function useAppState() {
     actions: {
       login, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
-      pauseBlock, resumeBlock, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan, loadNotifications, markNotificationsRead,
+      pauseBlock, resumeBlock, setBlockLocked, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan, loadNotifications, markNotificationsRead,
     } satisfies Actions,
   };
 }
