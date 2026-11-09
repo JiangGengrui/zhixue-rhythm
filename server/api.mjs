@@ -3,6 +3,15 @@ import {
   newId, sessionCookie, clearCookie, verifyPassword, verifyRecoveryCode,
 } from './auth.mjs';
 import { nowISO, nowLocalISO } from './db.mjs';
+import {
+  createSessionStore, MAX_DAILY_QUESTIONS, nextShanghaiMidnightISO, normalizeSession,
+} from './assistant/sessions.mjs';
+import { answerFromKnowledge } from './assistant/retrieval.mjs';
+import { MAX_QUESTION_CHARS, streamModelReply, streamReply } from './assistant/chat.mjs';
+import { classify, planTools } from './assistant/route.mjs';
+import { buildFacts, createToolbox } from './assistant/tools.mjs';
+import { applyFault, resolveFault } from './assistant/faults.mjs';
+import { isLlmConfigured } from './assistant/llm.mjs';
 import { buildReport, decomposeGoal, evaluateAlerts, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -11,12 +20,23 @@ const LEVELS = new Set(['zero', 'once', 'twice', 'more']);
 const STATUSES = new Set(['pending', 'running', 'done', 'skipped']);
 const SKIP_REASONS = new Set(['interrupt', 'capacity', 'other', '']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// 面板上的三个「没用」原因；只认这三值，不让自由文本进库
+const FEEDBACK_REASONS = new Set(['wrong', 'unclear', 'not_wanted']);
+
+/** 格式对还不够，2026-02-30 这种也要挡掉：回写比对是最省事的办法 */
+const isISODate = (value) => {
+  if (typeof value !== 'string' || !DATE_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+};
 
 class HttpError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, extra) {
     super(message);
     this.status = status;
     this.code = code;
+    // 少数错误要带结构化附加信息（如 429 的 resetAt），由 index.mjs 平铺进响应体
+    if (extra) this.extra = extra;
   }
 }
 
@@ -174,6 +194,9 @@ export function createApi(db) {
     insertOp: db.prepare('INSERT INTO ops (user_id, op_id, created_at) VALUES (?, ?, ?)'),
   };
 
+  // 助手会话与配额的读写全部收敛在这个 store 里，api.mjs 只做参数校验与状态码
+  const chat = createSessionStore(db);
+
   function stateOf(user) {
     const goal = normalizeGoal(q.goalByUser.get(user.id));
     const items = q.itemsByUser.all(user.id).map(normalizeItem);
@@ -185,6 +208,22 @@ export function createApi(db) {
       blocks,
       settings: user.settings,
     };
+  }
+
+  /**
+   * 会话归属判定（SPEC §9 + R7）：
+   * - 带 id 且属于自己、未软删 → 用它
+   * - 带 id 但不属于自己 → 404，避免用 id 探测别人的会话
+   * - 带 id 但已软删 / 根本不存在 → 新建，并把新 id 通过 meta 回给前端
+   */
+  function resolveChatSession(userId, question, sessionId) {
+    if (typeof sessionId === 'string' && sessionId) {
+      const owned = chat.get(userId, sessionId);
+      if (owned) return owned;
+      const any = chat.findAny(sessionId);
+      if (any && any.user_id !== userId) throw notFound();
+    }
+    return chat.create(userId, question);
   }
 
   const handlers = {
@@ -833,9 +872,111 @@ export function createApi(db) {
       }
       return { blocks: q.blocksByWeek.all(user.id, weekStart, weekEnd).map(normalizeBlock) };
     },
+
+    // 面板不接这个入口（DECISIONS D8.1），留给排障与脚本：只返回当前用户最近 20 条
+    'GET /api/assistant/sessions': ({ user }) => ({ sessions: chat.list(user.id, 20) }),
+
+    // 助手问答：阶段 1 只走语料直答（不调模型），SSE 骨架与落库/配额先跑通
+    'POST /api/assistant/chat': async ({ user, body, res }) => {
+      const question = typeof body?.question === 'string' ? body.question.trim() : '';
+      if (!question) throw bad('E1001', '问题不能为空');
+      assert(question.length <= MAX_QUESTION_CHARS, 'E1002', `问题不能超过 ${MAX_QUESTION_CHARS} 字`);
+
+      // 限流在开流之前判：429 必须是普通 JSON，而不是开了流再报错（SPEC R6）
+      if (chat.usedToday(user.id) >= MAX_DAILY_QUESTIONS) {
+        throw new HttpError(
+          429,
+          'E2002',
+          `今天的 ${MAX_DAILY_QUESTIONS} 个问题已经问完，明天 00:00 恢复`,
+          { resetAt: nextShanghaiMidnightISO() },
+        );
+      }
+
+      const session = resolveChatSession(user.id, question, body?.sessionId);
+      // 面板上点了条带里的某天就带上它。不合法当没传：UI 的小错不该把提问变成 400
+      const focusDate = isISODate(body?.date) ? body.date : undefined;
+
+      // B 类：先取只读工具事实，再让模型把数字讲顺；取不到事实就不调模型（DECISIONS D9.2）
+      if (classify(question) === 'data') {
+        // today 换成所选日期：get_today 取的是那天，「今天做了多久」才不会答成今天
+        const toolbox = createToolbox({ state: stateOf(user), today: focusDate });
+        const names = planTools(question);
+        const results = await Promise.all(names.map((name) => toolbox.call(name)));
+        const facts = buildFacts(results);
+        // 显式告诉模型它在讲哪一天，避免它把 focusDate 的数据说成「今天」
+        if (facts && focusDate) facts.focusDate = focusDate;
+        // 故障注入只改「模型这一段」，工具事实照常取：这样三条降级路径的
+        // 前置条件（有事实、有权限）与生产一致，测的才是真正的降级分支
+        const override = applyFault(resolveFault());
+        await streamModelReply({
+          res,
+          store: chat,
+          userId: user.id,
+          question,
+          sessionId: session.id,
+          mode: 'data',
+          history: chat.recentMessages(user.id, session.id, 6),
+          // buildFacts 在「一个工具都没成功」时返回 null，正好让 streamModelReply 走降级
+          facts: facts ?? undefined,
+          toolCalls: results.map(({ name, status }) => ({ name, status })),
+          ...override,
+        });
+        return { __sent: true };
+      }
+
+      // A 类不调模型：正文就是语料 answer 原文，可逐字比对（SPEC R2）
+      const answer = answerFromKnowledge(question);
+      await streamReply({
+        res,
+        store: chat,
+        userId: user.id,
+        question,
+        sessionId: session.id,
+        answer,
+        // 与 B 类同一套判定：空串 / 纯空格的 Key 都算「没配」，避免前端显示成已接入模型
+        degraded: !isLlmConfigured(),
+      });
+      return { __sent: true };
+    },
   };
 
   return async function route(method, path, ctx) {
+    // 助手会话：GET 取消息、DELETE 软删（软删 30 天后由 purgeAssistantData 物理清理）
+    const sessionMatch = path.match(/^\/api\/assistant\/sessions\/([\w-]+)$/);
+    if (sessionMatch) {
+      const user = requireUser(ctx);
+      const sessionId = sessionMatch[1];
+      if (method === 'GET') {
+        const session = chat.get(user.id, sessionId);
+        if (!session) throw notFound();
+        return { session: normalizeSession(session), messages: chat.messages(user.id, sessionId) };
+      }
+      if (method !== 'DELETE') throw new HttpError(405, 'E1000', '方法不支持');
+      // 不属于当前用户与已软删都返回同一个 404，避免用 id 探测别人的会话
+      if (!chat.softDelete(user.id, sessionId)) throw notFound();
+      return { ok: true };
+    }
+
+    // 助手回答的赞/踩：value 为 'up' / 'down' / null（取消），down 可带三种原因之一
+    const messageFeedbackMatch = path.match(/^\/api\/assistant\/messages\/([\w-]+)\/feedback$/);
+    if (messageFeedbackMatch) {
+      if (method !== 'PATCH') throw new HttpError(405, 'E1000', '方法不支持');
+      const user = requireUser(ctx);
+      const value = ctx.body?.value;
+      const reason = ctx.body?.reason;
+      // 取消也要能落到库里，所以 value=null 是合法输入，不能用「必填」去卡
+      if (value !== null && value !== 'up' && value !== 'down') {
+        throw bad('E1016', '反馈只能是「有用」「没用」或取消');
+      }
+      if (value === 'down' && reason != null && !FEEDBACK_REASONS.has(reason)) {
+        throw bad('E1016', '反馈原因只能是答错了、没看懂、不是我想要的');
+      }
+      const feedback = value === null ? null : value === 'down' && reason ? `down:${reason}` : value;
+      // 不是自己的消息一律 404：不用「403」告诉对方这条消息存在
+      if (!chat.setMessageFeedback(user.id, messageFeedbackMatch[1], feedback)) throw notFound();
+      return { ok: true, feedback };
+    }
+
     // 动态路由：/api/items/:id、/api/blocks/:id
     const itemMatch = path.match(/^\/api\/items\/([\w-]+)$/);
     if (itemMatch) {

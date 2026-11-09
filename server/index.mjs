@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.mjs';
 import { currentUser } from './auth.mjs';
 import { createApi, HttpError } from './api.mjs';
+import { purgeAssistantData } from './assistant/sessions.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -28,6 +29,16 @@ const MAX_BODY = 1024 * 1024;
 export function startServer(options = {}) {
   const dbFile = options.dbFile ?? process.env.DB_FILE ?? join(ROOT, 'data', 'zhixue.db');
   const db = openDb(dbFile);
+  // 启动时清一次过期会话：不做定时器，单进程重启即够（SPEC R6 的 30 天保留期）
+  try {
+    const purged = purgeAssistantData(db);
+    if (purged.sessions > 0) {
+      console.log(`[assistant] 清理过期会话 ${purged.sessions} 个（消息 ${purged.messages} 条）`);
+    }
+  } catch (err) {
+    // 清理失败不能拦住启动：留着下次再清
+    console.error('[assistant] 清理过期会话失败', err);
+  }
   const route = createApi(db);
 
   const server = http.createServer(async (req, res) => {
@@ -59,7 +70,7 @@ export function startServer(options = {}) {
       await serveStatic(url.pathname, res);
     } catch (err) {
       if (err instanceof HttpError) {
-        sendJson(res, err.status, { error: { code: err.code, message: err.message } });
+        sendJson(res, err.status, { error: { code: err.code, message: err.message }, ...(err.extra ?? {}) });
         return;
       }
       console.error('[server] 未预期错误', err);

@@ -10,7 +10,89 @@
 
 ## [Unreleased]
 
-无进行中的改动。
+### 助手交互闭环（S5 · T12）
+
+- **空态建议问题**：4 条、2 功能类 + 2 数据类，按「有没有自己的数据」切换——没建目标时不再问「这周还剩多少」（那样只会得到「先建目标」），换成「今天任务从哪开始？」这类引导问法。文案抽成 `suggestionsFor()` 并单测。
+- **赞 / 踩**：每条回答下「有用 / 没用」，没用再展开「答错了 / 没看懂 / 不是我想要的」；再点同一按钮取消。乐观更新先亮起，失败回滚并提示。新接口 `PATCH /api/assistant/messages/:id/feedback`，落库成 `up` / `down:<reason>` / `NULL`，条件里带 `user_id`，别人的消息统一 404。
+- **复制**：一键复制正文，按钮短暂变「已复制」；`navigator.clipboard` 不可用（http 非 localhost）时退回 `execCommand`，不让按钮点了没反应。
+- **清空会话**：头部「清空」+ `window.confirm` 二次确认，清完回空态并取消选中日期。
+- **模式标识**：每条回答顶部标「功能答疑 / 你的数据」，数据类用主色高亮。
+- **`done` 帧带 `messageId`**：反馈要靠它定位消息。id 在发 `done` 之前预生成、落库复用，保持「先发 `done` 再落库」的顺序不变（R6）。
+- **测试**：新增 `src/assistant/suggestions.test.ts`（5 条）；`sessions.test.mjs` 增反馈用例（本人改/取消/越权/不存在）；`api.test.mjs` 增反馈端到端（从会话详情反查落库、越权 404、非法原因 400、方法 405）。
+
+### 助手条带选日（S5 · T11 补完）
+
+- **七列条带**：面板头部下方按周显示 7 天，每列是星期、日号、当天「已完成/总数」；点一列选中、再点取消。
+- **日期参与取数**：选中后输入区常驻「已选 X 月 X 日（周 X），提问按这天算」，请求体带 `date`；服务端把 `today` 换成该日（`get_today` 取那天的数据），并写进 `facts.focusDate`，避免把所选日的数据说成「今天」。格式对但不存在的日期（`2026-02-30`）静默忽略，不把 UI 小错变成 400。
+
+### 助手面板（S5 · T11）
+
+- **新面板**：右下角「问助手」浮层（720px 以下整屏），`Esc` 关闭；登录后出现在五页之上，离线时入口禁用并说明原因，点了不会发必然失败的请求。
+- **流式消费**：`src/assistant/sse.ts` 自研增量解析（不用 `EventSource`——本项目要 POST 请求体、要能 `AbortController`），处理跨块拆包、粘包、CRLF、心跳注释、非法 JSON；`useAssistant` 依次消费 `meta`（定模式）/ `status`（首 token 慢的等待提示）/ `delta` / `done`，停止按钮与组件卸载都走 abort。
+- **不会出现空气泡**：`pending` 时显示占位文案；没收到 `done` 就断流时，`finally` 兜底收成 `incomplete` 并提示「这次回答不完整」，保留已收到的正文。
+- **引用 chip**：`CitationChip` 导出复用；有 `route` 的渲染成链接（`#week` 等）走既有 `hashchange` 跳页，没有对应页面的渲染成纯文本，点了不报错。
+- **三种「不让问」**：空输入禁用、>500 字拦截并在计数处变黄提示、离线禁用；正文一律文本节点渲染，无 `dangerouslySetInnerHTML`。
+- **服务端对齐**：A 类的 `degraded` 改用 `isLlmConfigured()` 判定（空串 / 纯空格 Key 都算没配），与 B 类同一套标准；前端只在 `mode === 'data'` 时展示降级标记，避免把知识类回答误标成「取不到数据」。
+- **测试**：新增 `src/assistant/sse.test.ts`（8 条），`vitest` 63 条全绿。
+
+### 助手降级链（S5 · T8）
+
+- **故障注入**：新增 `server/assistant/faults.mjs`。环境变量 `ASSISTANT_FAULT=nokey|upstream500|timeout` 可把「无 Key / 上游 5xx / 超时」三条路径变成可重复的测试，`NODE_ENV=production` 时读到也只打一行警告、不生效。注入**只覆盖模型这一段**（假 Key + 假 fetch，50ms 注入超时），工具事实照常取——否则测到的是「没有事实」而不是「有事实但模型坏了」（DECISIONS D9.4）。
+- **`done` 帧补 `degraded`**：`meta.degraded` 是开口前的判断，上游中途失败只能事后知道；前端以 `done` 为准，避免降级文案配着「未降级」状态渲染（D9.5）。
+- **半截失败有回执**：已发出正文后上游断开时保留前文、补一句「这次回答不完整」，`done.incomplete=true`，不强行换 `DEGRADED_DATA_TEXT`（换文案会拼出病句）。可见层仍不含状态码、`fetch`、`timeout` 等原始信息。
+- **测试卫生**：`api.test.mjs` 在启动服务前清空 `ASSISTANT_API_KEY`，本机配了真实 Key 时不会真的请求上游（D9.6）。
+- **测试**：新增 `faults.test.mjs`（6 条：取值校验 / 生产忽略 / 三种覆盖项结构 / 挂起与 abort）；`api.test.mjs` 增一条三条路径的端到端用例（文案全等、`done.degraded`、`citations` 为空、正文无数字、事件 `degraded=1` 且 `tool_names` 非空）；`chat.test.mjs` 增「半截失败」用例。`node --test` 114 条 + `vitest` 55 条全绿。
+
+### 助手数据类回答（S5 · T10）
+
+- **工具编排**：`route.mjs` 增 `planTools(question)`——按问法选 1–3 个工具，被明确问到的工具优先占名额，`get_week` 只在还有空位时补位，避免「我的目标这周可用时间」把 `get_settings` 挤掉。
+- **事实注入**：`tools.mjs` 增 `buildFacts(results)`，把成功工具的结果合成 `{ hasData, tools, failedTools }` 注入 system 的「当前用户数据」区块；**一个工具都没成功时返回 `null`**，`streamModelReply` 据此不调模型、直接回 `DEGRADED_DATA_TEXT`（DECISIONS D9.2）。
+- **取数口径**：`createToolbox` 默认按「今天所在的周」取数（`weekStartFor(today, settings.weekStart)`），不再从今天起算 7 天——跨周提问时后者会把两周的尾巴拼成一周，与 `/api/report` 对不上。
+- **可归因**：每次 B 类回答都把工具名与状态写进 `assistant_events.tool_names` 与消息的 `tool_calls`，出问题时能区分「没取到数据」和「模型没用好」。
+- **测试**：`route.test.mjs` 增 `planTools` 三条（含优先级与 ≤3 上限）、`tools.test.mjs` 增 `weekStartFor` / 默认周 / `buildFacts` 三条、`api.test.mjs` 增「事件里记录了实际工具」断言。`node --test` 106 条 + `vitest` 55 条全绿。
+
+### 助手模型层与只读工具（S5 · T7、T9）
+
+- **提示词（T7）**：新增 `server/assistant/prompt.mjs`。三块 system 分别管「能答什么 / 怎么答 / 数字从哪来」；`PROMPT_VERSION='v1'` 与事件一起入库，改模板必须改版本。上下文只带最近 3 轮（`trimHistory`），`DEGRADED_DATA_TEXT` 与 SPEC 附录 B 逐字一致且不含任何数字。
+- **模型调用（T7）**：新增 `server/assistant/llm.mjs`，OpenAI 兼容流式、零第三方依赖。总超时 20s 由服务端定时器控制（不依赖前端 `AbortController`）；错误分 `config / upstream / timeout / network / aborted` 五类并携带 `partial`（已收到的半截文本）；上游正文不进日志也不回显。
+- **降级口径**：`chat.mjs` 新增 `streamModelReply`。**没有工具事实就不让模型开口**——直接整段 `DEGRADED_DATA_TEXT`；已发出半截才失败则补「回答不完整」并在 `done` 带 `incomplete`，不强行换文案（会拼出病句）。A 类仍完全不走模型，保证与语料逐字一致（SPEC R2）。
+- **意图路由（T7）**：新增 `server/assistant/route.mjs` 的 `classify()`，纯函数二分「数据类 / 知识类」。SPEC §5.1.1 的裸词「偏差」「归因」与附录 A 第 15、16 条互斥，按 `DECISIONS D9.1` 改为限定词组合，24 条问法做回归。
+- **只读工具（T9）**：新增 `server/assistant/tools.mjs`，白名单 `get_goal / get_week / get_today / get_report / get_settings`。全部从 `GET /api/state` 的内存快照派生，无写路径、无自由 SQL；`get_report` 直接复用引擎 `buildReport` 保证与接口同源；单次 3s 超时与异常都收敛为 `status:'fail'`，不向上抛。
+- **健壮性修复（review 产出）**：SSE 改为「安全写」通道——客户端断开的瞬间写已关闭 socket 会抛 `ERR_STREAM_WRITE_AFTER_END`，外层此时响应头已发，再 `sendJson` 会二次抛 `ERR_HTTP_HEADERS_SENT`；现在写失败即标记断开并静默丢弃后续帧。`done` 发出前再确认一次断开状态，保证「只有 `done` 真的发出才落库、才占配额」。`sessions.mjs` 加 `recentMessages`（SQL `LIMIT`），不再为 6 条上下文把整段历史读进内存。
+- **测试**：新增 `prompt.test.mjs`（6）、`route.test.mjs`（5）、`llm.test.mjs`（9，含假上游的正常流/5xx/超时/空响应/错误帧/取消）、`tools.test.mjs`（12）；`chat.test.mjs` 增「写已关闭 socket 不抛错」。`node --test` 101 条 + `vitest` 55 条全绿。
+
+### 助手服务端（S5 · T1–T6）
+
+- **数据层（T1）**：`db.mjs` 新增 `chat_sessions` / `chat_messages` / `assistant_events` 三张表与索引（`chat_sessions(user_id, updated_at DESC)`、`chat_messages(session_id, created_at)`、`assistant_events(user_id, day)`）。`assistant_events` 多加一个 `day` 列（`Asia/Shanghai` 自然日）：配额按自然日计数，若每次请求现场算时区，凌晨的记录就会算错天，落列后既准又能走索引。
+- **会话存储（T1）**：新增 `server/assistant/sessions.mjs`（原计划叫 `store.mjs`，改名因为它只管会话/消息/事件）。含软删、按用户隔离的读取、`usedToday` 配额计数与 `purgeAssistantData`（软删满 30 天、或 30 天没更新的会话，连同消息与事件一起物理删除）；`index.mjs` 启动时清一次，失败只记日志不拦启动。
+- **会话端点（T2）**：`GET /api/assistant/sessions`（最近 20 条）、`GET /api/assistant/sessions/:id`（会话 + 消息）、`DELETE /api/assistant/sessions/:id`（软删）。不属于当前用户与已软删一律 404 `E4004`，避免用 id 探测别人的会话。
+- **流式问答（T3–T5）**：`POST /api/assistant/chat` 走 SSE（`meta` → `delta`* → `done`），阶段 1 只做 A 类直答：正文就是语料 `answer` 原文（可逐字比对），未命中返回 `FALLBACK_TEXT` 且 `citations=[]`。落库与配额都在 `done` 之后：客户端中途断流不写消息、不占配额（SPEC R6）。限流在开流前判，第 31 次提问返回 `429 E2002` 并带 `resetAt`（次日 00:00），被限流的请求不新建会话。五条错误码 `E1001/E1002/E2001/E2002/E4004` 全路径可触发（`HttpError` 支持携带结构化附加字段）。
+- **语料 `route` 契约（T6）**：`knowledge.mjs` 集中的 `ROUTES` 表给 21 条语料赋页面 key（只允许 App 的五个 Tab），`tech`/`design`/`deploy` 三条为 `null`（文档类主题，无可跳页面）；`KNOWLEDGE` 由 `ENTRIES` 派生，检索结果与 `citations` 都带 `route`。
+- **测试**：新增 `sessions.test.mjs`（8 条）、`knowledge.test.mjs`（8 条，含 SPEC 附录 A 的 24 条触发问法 24/24 命中与附录 B 的 8 条兜底探针）、`chat.test.mjs`（3 条，含断流不落库）；`api.test.mjs` 增 6 条助手用例（SSE 直答与落库、兜底、参数与 401、越权 404、已删会话新建、30 次后 429）。当前 `node --test` 65 条 + `vitest` 55 条全绿。
+- **与计划的两处偏差**：`store.mjs` 改名 `sessions.mjs`；不单开 `sse.mjs`，帧编码并入 `chat.mjs`——本阶段没有模型长流，心跳与 20s 收尾随 T7–T8 再做。`PLAN.md` 已同步。
+
+### 工程基线（S5 · T0）
+
+- **新增 `CODEBUDDY.md`**：四段（项目结构 / 命令 / 代码规范 / 边界）。结构与命令逐条对照真实文件核对，修正了两处初稿想当然：样式实际在 `src/styles/app.css`（不是 `src/styles.css`）、构建是三入口多页（`index.html` / `app.html` / `privacy.html`）。
+- **接入 eslint**（此前项目无 lint 而 Gm 要求跑 lint）：新增 `eslint.config.js`（flat config，`@eslint/js` + `typescript-eslint` + `globals`）与 `lint`/`lint:fix` 脚本；忽略 `dist/`、`data/`、`backups/`、`artifacts/`、`mockups/`、`public/` 与生成物 `server/engine.generated.mjs`。
+- **修掉既有 8 处 lint 错误**（均为真问题，非规则妥协）：`scripts/{demo-shots,morph-probe,shot}.mjs` 把 `cond ? reject() : resolve()` 这种表达式语句改成 if/else；`server/api.test.mjs` 与 `src/landing/three-effects.js` 各删一个从未被读取的变量（`second`、`time`）；`server/assistant/retrieval.mjs` 标点正则去掉字符类里多余的 `\.` `\?` `\[` 转义（语义不变，检索单测 9/9 仍绿）。
+- **`checklists/GATES.md` 的 Gm 改为 lint / typecheck / test 三条**（build 降为附加项，上线前必绿），并留变更记录。
+- 本次闸门实测：`lint=0 typecheck=0 test=0`（单测 40/40），附加 `build=0`。
+
+### 闸门与计划（S3 收尾 + S4）
+
+- **新增 `checklists/GATES.md`**（仓库根，此前被 `story.md` 引用但不存在）：定义 G1/G2/G3/G4/Gm/G5 六道闸门，共 30 条可判据 + 未覆盖项。Gm 按现状只判 `typecheck`/`test`/`build`，因为本项目**没有 lint**（无 eslint 依赖与配置），等 S5 接入后再补第 1 条。
+- **新增 `PLAN.md`**：15 个任务（T0–T14），每个带「完成判据 + AC 编号 + 依赖 + 人日」，含工时对账（SPEC 8.5 vs 本计划 9.75，差额逐项说明）、关键路径、风险表、防蔓延清单。
+- **`SPEC.md` 同步三处**（架构评审的连带项）：`assistant_events` 增 `first_token_ms` 与 `prompt_version`；§8 增 `PROMPT_VERSION` 规则；修订记录补三行（含 AC 编号方案说明）。
+- **`ARCHITECTURE.md` 补三处**：同上两个字段、会话端点与 UI 的落差（D8.1）、模板版本与指标归因（D8.2）。
+- **`DECISIONS.md` 增 D8**：D8.1 面板不做历史会话入口；D8.2 提示词版本化；D8.3 本期不改 `Secure` Cookie；D8.4 验收编号方案 `AC-<R号>-<序号>`。
+
+### 文档（助手子系统，代码未动）
+
+- **新增 `ARCHITECTURE.md` v1.0**：按「需求 → 高层 → 深入 → 规模 → 取舍」五段写助手子系统架构，含组件图、A/B 两条链路、三张新表、SSE 契约、工具层、限流真源、故障模式与 8 条 ADR。
+- **新增 `ARCHITECTURE.review.md`**：评审记录。修正 8 处（含流式端点 `__sent` 握手、`first_token_ms` 字段缺失、路由判定二义、清理触发点、断网行为、Cookie 安全属性、配额日期口径、一句无证据的实测表述）；留 3 项待决（历史会话入口、prompt 版本化、`Secure` Cookie）。
+- **新增 `ARCHITECTURE.diagram.html`**：手绘 SVG 架构图。archify CLI 在本机因文件系统身份校验失败无法出图（`sidecar-case-semantics-indeterminate`、`delivery-ownership-lost`），按技能允许的人工兜底路径交付，未经其自动校验。
+- **SPEC 待同步**：`§7.3` 需补 `assistant_events.first_token_ms`（评审项 2），下次改 SPEC 时一并处理。
 
 ## [v1.3.2] — 2026-11-09 · 界面精简与计划链修复
 

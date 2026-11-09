@@ -6,11 +6,11 @@
 
 [在线体验](https://zhixue-rhythm-343909-9-1412780291.sh.run.tcloudbase.com/) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.3.1-2be6ae)
+![version](https://img.shields.io/badge/version-1.3.2-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
-![tests](https://img.shields.io/badge/tests-68%20passed-2be6ae)
+![tests](https://img.shields.io/badge/tests-95%20passed-2be6ae)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
@@ -89,7 +89,7 @@ cloudbaserc.json         # 目标环境与云托管服务名
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出/改密/重置密码即失效 |
 | 同构 | esbuild 把 `src/domain` 打成服务端模块 | 排程与周报**前后端共用同一份源码**，不存在两套算法 |
 | 离线 | localStorage 操作队列 + `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
-| 测试 | Vitest + `node:test` + CDP | 68 条自动化用例 + 23 项浏览器端到端 |
+| 测试 | Vitest + `node:test` + CDP | 95 条自动化用例（55 单测 + 31 接口 + 9 助手检索）+ 真实浏览器端到端全链路 |
 
 > 架构文档原定 Go + Postgres。当前环境没有这两者，为了「一条命令就能跑」，后端先落在 Node + SQLite 上；**接口契约与领域规则保持一致**，后续平移 Go 时前端无需改动。
 

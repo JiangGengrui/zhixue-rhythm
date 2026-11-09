@@ -42,7 +42,6 @@ const start = () => {
     let lift = 0;
     let placed = false;
     let interacted = false;
-    let time = 0;
     const pointer = { x: 0, y: 0 };
     let dragging = false;
     let grab = { x: 0, y: 0 };
@@ -249,7 +248,6 @@ const start = () => {
     function loop(now) {
       const dt = Math.min(0.032, (now - prev) / 1000) || 0.016;
       prev = now;
-      time += dt;
       step(dt);
       render();
       raf = requestAnimationFrame(loop);

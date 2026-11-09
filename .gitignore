@@ -16,3 +16,7 @@ server/engine.generated.mjs
 *.db
 *.db-wal
 *.db-shm
+
+# archify 架构图工具的本地缓存
+.archify/
+.archify-path-semantics-*

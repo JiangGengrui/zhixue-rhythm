@@ -18,6 +18,7 @@ import { WeekPage } from './pages/WeekPage';
 import { ReportPage } from './pages/ReportPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AuthPage } from './pages/AuthPage';
+import { AssistantPanel } from './assistant/AssistantPanel';
 import { startOfWeek, todayISO, weekDates, weekdayOf } from './domain/date';
 
 type Tab = 'today' | 'goal' | 'week' | 'report' | 'settings';
@@ -32,6 +33,9 @@ const TABS: Array<{ key: Tab; label: string; icon: (p: { className?: string }) =
 ];
 
 const THEME_KEY = 'zhixue-theme';
+
+/** 周日在前，与 `weekdayOf` 的 0~6 对齐 */
+const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 function readTheme(): Theme {
   try {
@@ -243,6 +247,17 @@ export default function App() {
     weekBlocks.filter((b) => b.date === d).reduce((s, b) => s + (b.endMin - b.startMin), 0),
   );
   const todayIndex = (weekdayOf(today) - (state.settings?.weekStart ?? 1) + 7) % 7;
+
+  // 助手条带的七列：日期 + 当天任务数与已完成数，点某天就按那天提问
+  const assistantDays = weekDates(weekStart).map((date) => {
+    const blocks = weekBlocks.filter((b) => b.date === date);
+    return {
+      date,
+      label: WEEKDAY_LABELS[weekdayOf(date)] ?? '',
+      total: blocks.length,
+      done: blocks.filter((b) => b.status === 'done').length,
+    };
+  });
 
   if (phase === 'loading') {
     return (
@@ -460,6 +475,16 @@ export default function App() {
       </nav>
 
       {recoveryCode && <RecoveryNotice code={recoveryCode} onClose={actions.dismissRecovery} />}
+
+      {/* 助手只在登录后出现；离线时入口禁用，避免点了必然失败的请求 */}
+      {(phase === 'ready' || phase === 'offline') && (
+        <AssistantPanel
+          offline={phase === 'offline'}
+          days={assistantDays}
+          // 有没有「自己的数据」决定空态建议问题：没建目标时再问剩余任务只会得到「先建目标」
+          hasData={Boolean(state.goal)}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './index.mjs';
+import { KNOWLEDGE } from './assistant/knowledge.mjs';
+import { FALLBACK_TEXT } from './assistant/retrieval.mjs';
+import { MAX_DAILY_QUESTIONS } from './assistant/sessions.mjs';
+import { DEGRADED_DATA_TEXT } from './assistant/prompt.mjs';
+import { FAULT_KINDS } from './assistant/faults.mjs';
+import { createToolbox } from './assistant/tools.mjs';
+import { todayISO } from './engine.generated.mjs';
+
+// 测试必须自洽：本机若配了真实的 ASSISTANT_API_KEY，B 类用例会真的去请求上游，
+// 结果取决于网络而不是代码。服务启动前清掉，保证「无 Key」是确定的前提。
+delete process.env.ASSISTANT_API_KEY;
 
 const app = startServer({ dbFile: ':memory:' });
 await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
@@ -368,7 +379,7 @@ test('任务锁定：锁定块在重建与重排中保留，且禁止移动', as
   }
   const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09' }, cookie);
   assert.ok(gen.json.blocks.length >= 2);
-  const [first, second] = gen.json.blocks;
+  const [first] = gen.json.blocks;
 
   // 锁定第一块
   const locked = await call('PATCH', `/api/blocks/${first.id}`, { locked: true }, cookie);
@@ -801,6 +812,318 @@ test('登出后会话失效', async () => {
   assert.equal(out.status, 200);
   const after = await call('GET', '/api/state', null, cookie);
   assert.equal(after.status, 401);
+});
+
+// ---------------------------------------------------------------- 助手（A 类 + 会话）
+
+/** 解析 SSE 文本为 [{event, data}]；只认本项目下发的 event/data 两行格式 */
+function parseSSE(text) {
+  return text
+    .split('\n\n')
+    .filter((block) => block.trim())
+    .map((block) => {
+      const event = /^event: (.+)$/m.exec(block)?.[1];
+      const data = /^data: (.+)$/m.exec(block)?.[1];
+      return { event, data: data ? JSON.parse(data) : null };
+    });
+}
+
+async function chat(question, cookie, sessionId, date) {
+  const res = await fetch(`${base}/api/assistant/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify({
+      question,
+      ...(sessionId ? { sessionId } : {}),
+      ...(date ? { date } : {}),
+    }),
+  });
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('text/event-stream')) {
+    return { status: res.status, json: await res.json(), events: null };
+  }
+  const events = parseSSE(await res.text());
+  const meta = events.find((e) => e.event === 'meta')?.data;
+  const done = events.find((e) => e.event === 'done')?.data;
+  const text = events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+  return { status: res.status, meta, done, text, events };
+}
+
+test('助手：A 类问题以 SSE 直答语料原文，并落库成两条消息', async () => {
+  const { cookie } = await register('assist-a@test.dev');
+  const expected = KNOWLEDGE.find((entry) => entry.id === 'goal-set');
+
+  const r = await chat('怎么设置目标', cookie);
+  assert.equal(r.status, 200);
+  assert.equal(r.meta.mode, 'knowledge');
+  assert.ok(r.meta.sessionId.startsWith('sess_'));
+  // A 类正文必须与语料逐字一致（SPEC R2），所以用全等而不是包含
+  assert.equal(r.text, expected.answer);
+  assert.ok(r.done.citations.length >= 1 && r.done.citations.length <= 3);
+  assert.equal(r.done.citations[0].doc, expected.doc);
+  assert.equal(r.done.fallback, false);
+
+  const detail = await call('GET', `/api/assistant/sessions/${r.meta.sessionId}`, null, cookie);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.json.messages.map((m) => m.role), ['user', 'assistant']);
+  assert.equal(detail.json.messages[0].content, '怎么设置目标');
+  assert.equal(detail.json.messages[1].content, expected.answer);
+
+  const list = await call('GET', '/api/assistant/sessions', null, cookie);
+  assert.deepEqual(list.json.sessions.map((s) => s.id), [r.meta.sessionId]);
+});
+
+test('助手：数据类问题在无 Key 时回固定降级文案，数字个数为 0', async () => {
+  const { cookie } = await register('assist-data@test.dev');
+  const r = await chat('我这周还剩多少任务', cookie);
+
+  assert.equal(r.status, 200);
+  assert.equal(r.meta.mode, 'data');
+  assert.equal(r.meta.degraded, true);
+  assert.equal(r.text, DEGRADED_DATA_TEXT);
+  assert.equal(/\d/.test(r.text), false, '降级文案里的数字会被当成结论，必须一个都没有');
+
+  // 降级也是一次完整回答：照样落库、照样计配额
+  const detail = await call('GET', `/api/assistant/sessions/${r.meta.sessionId}`, null, cookie);
+  assert.equal(detail.json.messages[1].mode, 'data');
+  assert.equal(detail.json.messages[1].content, DEGRADED_DATA_TEXT);
+
+  // 工具确实跑过并记进事件：没有这段记录，出问题时无法判断是「没取到数据」还是「模型没用好」
+  const event = app.db.prepare(
+    'SELECT tool_names, mode, degraded FROM assistant_events WHERE question = ? ORDER BY id DESC LIMIT 1',
+  ).get('我这周还剩多少任务');
+  assert.equal(event.mode, 'data');
+  assert.equal(event.degraded, 1);
+  const toolNames = JSON.parse(event.tool_names ?? '[]');
+  assert.ok(toolNames.includes('get_week'), `实际工具：${event.tool_names}`);
+});
+
+test('助手：故障注入三条路径（无 Key / 上游 500 / 超时）都落到同一降级文案', async () => {
+  const { cookie } = await register('assist-fault@test.dev');
+  await call('PUT', '/api/goal', {
+    title: '考研', deadline: '2026-12-20', weeklyMinutes: 600, level: 'once',
+  }, cookie);
+
+  const kindOf = (question) => app.db.prepare(
+    'SELECT tool_names, degraded FROM assistant_events WHERE question = ? ORDER BY id DESC LIMIT 1',
+  ).get(question);
+
+  try {
+    for (const [i, kind] of FAULT_KINDS.entries()) {
+      process.env.ASSISTANT_FAULT = kind;
+      // 每次换一句问法：事件表按 question 回查，同句会互相串行
+      const question = `这周还剩多少任务（故障 ${i}）`;
+      const r = await chat(question, cookie);
+
+      assert.equal(r.status, 200, `${kind} 不应把故障变成 HTTP 错误`);
+      assert.equal(r.meta.mode, 'data');
+      assert.equal(r.text, DEGRADED_DATA_TEXT, `${kind} 应回固定降级文案`);
+      assert.equal(/\d/.test(r.text), false, `${kind} 的文案里不能出现数字`);
+      // meta 是开口前的判断，done 才是最终结果；上游中途失败只有 done 里才准
+      assert.equal(r.done.degraded, true, `${kind} 的 done 必须标记降级`);
+      assert.deepEqual(r.done.citations, []);
+      assert.equal(r.events.some((e) => e.event === 'error'), false, '不能把上游细节写进流里');
+
+      const event = kindOf(question);
+      assert.equal(event.degraded, 1);
+      // 降级发生在「模型这一段」：工具事实照常取到，否则测的就不是降级链
+      assert.ok(JSON.parse(event.tool_names ?? '[]').length > 0, `${kind} 应已取到工具事实`);
+    }
+  } finally {
+    delete process.env.ASSISTANT_FAULT;
+  }
+
+  // 开关关掉后恢复正常：同一账号再问不会继承上一次的降级
+  const normal = await chat('这周还剩多少任务（恢复）', cookie);
+  assert.equal(normal.meta.mode, 'data');
+  assert.equal(normal.meta.degraded, true, '本机无真实 Key，仍走无 Key 降级');
+});
+
+test('助手：未命中语料返回兜底文案且无引用', async () => {
+  const { cookie } = await register('assist-fb@test.dev');
+  const r = await chat('帮我写首诗', cookie);
+
+  assert.equal(r.status, 200);
+  assert.equal(r.text, FALLBACK_TEXT);
+  assert.deepEqual(r.done.citations, []);
+  assert.equal(r.done.fallback, true);
+});
+
+test('助手反馈：赞、踩带原因、取消都落库，别人的消息改不动', async () => {
+  const owner = await register('assist-fb-owner@test.dev');
+  const other = await register('assist-fb-other@test.dev');
+
+  const r = await chat('怎么设置目标', owner.cookie);
+  const messageId = r.done.messageId;
+  assert.ok(messageId, 'done 必须带 messageId，前端才能对这条回答反馈');
+
+  const url = `/api/assistant/messages/${messageId}/feedback`;
+  // 从会话详情读，验证的是真的落库，而不是响应体自己说自己成功
+  const stored = async () => {
+    const list = await call('GET', '/api/assistant/sessions', null, owner.cookie);
+    const detail = await call('GET', `/api/assistant/sessions/${list.json.sessions[0].id}`, null, owner.cookie);
+    return detail.json.messages.at(-1).feedback;
+  };
+
+  const up = await call('PATCH', url, { value: 'up' }, owner.cookie);
+  assert.equal(up.status, 200);
+  assert.equal(up.json.feedback, 'up');
+  assert.equal(await stored(), 'up');
+
+  const down = await call('PATCH', url, { value: 'down', reason: 'wrong' }, owner.cookie);
+  assert.equal(down.status, 200);
+  assert.equal(down.json.feedback, 'down:wrong', '踩要带原因存成 down:<reason>');
+  assert.equal(await stored(), 'down:wrong');
+
+  const cancel = await call('PATCH', url, { value: null }, owner.cookie);
+  assert.equal(cancel.status, 200);
+  assert.equal(cancel.json.feedback, null);
+  assert.equal(await stored(), undefined, '取消后要变回「没有评价」');
+
+  // 越权与不存在同一个 404，不告诉对方这条消息存不存在
+  const cross = await call('PATCH', url, { value: 'up' }, other.cookie);
+  assert.equal(cross.status, 404);
+  assert.equal(cross.json.error.code, 'E4004');
+  assert.equal(await stored(), undefined, '越权失败不能改到属主的数据');
+
+  const badReason = await call('PATCH', url, { value: 'down', reason: 'whatever' }, owner.cookie);
+  assert.equal(badReason.status, 400);
+  assert.equal(badReason.json.error.code, 'E1016');
+
+  const badValue = await call('PATCH', url, { value: 'meh' }, owner.cookie);
+  assert.equal(badValue.status, 400);
+
+  const wrongMethod = await call('POST', url, { value: 'up' }, owner.cookie);
+  assert.equal(wrongMethod.status, 405);
+});
+
+test('助手：条带点选的日期参与取数，非法日期静默忽略', async () => {
+  const { cookie } = await register('assist-date@test.dev');
+  await call('PUT', '/api/goal', {
+    title: '考研', deadline: '2026-12-20', weeklyMinutes: 600, level: 'once',
+  }, cookie);
+
+  // 2026-02-30 格式对但不存在：不能把用户的提问变成 400
+  const invalid = await chat('这周还剩多少任务', cookie, null, '2026-02-30');
+  assert.equal(invalid.status, 200);
+
+  const picked = await chat('今天的安排还剩多少', cookie, null, '2026-11-11');
+  assert.equal(picked.status, 200);
+  assert.equal(picked.meta.mode, 'data');
+
+  // 日期只进 facts，不改写提问原文；工具调用按所选日期走 get_today
+  const event = app.db.prepare(
+    'SELECT tool_names FROM assistant_events WHERE question = ? ORDER BY id DESC LIMIT 1',
+  ).get('今天的安排还剩多少');
+  assert.ok(JSON.parse(event.tool_names).includes('get_today'));
+});
+
+test('助手：空问题与超长问题被拒，未登录 401', async () => {
+  const { cookie } = await register('assist-bad@test.dev');
+
+  const empty = await chat('   ', cookie);
+  assert.equal(empty.status, 400);
+  assert.equal(empty.json.error.code, 'E1001');
+
+  const tooLong = await chat('问'.repeat(501), cookie);
+  assert.equal(tooLong.status, 400);
+  assert.equal(tooLong.json.error.code, 'E1002');
+
+  const anon = await chat('怎么设置目标', null);
+  assert.equal(anon.status, 401);
+  assert.equal(anon.json.error.code, 'E2001');
+
+  // 500 字是上限本身（『怎么设置目标』6 字 + 494），不能被误拒
+  const boundary = await chat('怎么设置目标' + '啊'.repeat(494), cookie);
+  assert.equal(boundary.status, 200);
+});
+
+test('助手：拿别人的 sessionId 发问返回 404', async () => {
+  const a = await register('assist-own-a@test.dev');
+  const b = await register('assist-own-b@test.dev');
+  const first = await chat('怎么设置目标', a.cookie);
+
+  const stolen = await chat('怎么设置目标', b.cookie, first.meta.sessionId);
+  assert.equal(stolen.status, 404);
+  assert.equal(stolen.json.error.code, 'E4004');
+
+  const missing = await call('GET', `/api/assistant/sessions/${first.meta.sessionId}`, null, b.cookie);
+  assert.equal(missing.status, 404);
+});
+
+test('助手：已删除的会话继续发问会新建会话并回新 id', async () => {
+  const { cookie } = await register('assist-del@test.dev');
+  const first = await chat('怎么设置目标', cookie);
+
+  const del = await call('DELETE', `/api/assistant/sessions/${first.meta.sessionId}`, null, cookie);
+  assert.equal(del.status, 200);
+
+  const again = await chat('怎么设置目标', cookie, first.meta.sessionId);
+  assert.equal(again.status, 200);
+  assert.notEqual(again.meta.sessionId, first.meta.sessionId);
+  assert.ok(again.text.length > 0);
+
+  const gone = await call('GET', `/api/assistant/sessions/${first.meta.sessionId}`, null, cookie);
+  assert.equal(gone.status, 404);
+});
+
+test('助手：同一自然日第 31 次提问返回 429 且给 resetAt，不再新建会话', async () => {
+  const { cookie } = await register('assist-quota@test.dev');
+  let sessionId = null;
+  for (let i = 0; i < MAX_DAILY_QUESTIONS; i += 1) {
+    const r = await chat('怎么设置目标', cookie, sessionId);
+    assert.equal(r.status, 200, `第 ${i + 1} 次提问应成功`);
+    sessionId = sessionId ?? r.meta.sessionId;
+  }
+
+  const blocked = await chat('怎么设置目标', cookie, sessionId);
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.json.error.code, 'E2002');
+  assert.ok(blocked.json.resetAt, '429 必须带 resetAt');
+  assert.ok(new Date(blocked.json.resetAt).getTime() > Date.now(), 'resetAt 应在未来');
+  // 429 在开流之前就拒绝：不能留下半个会话，也不能留下半截消息
+  const detail = await call('GET', `/api/assistant/sessions/${sessionId}`, null, cookie);
+  assert.equal(detail.json.messages.length, MAX_DAILY_QUESTIONS * 2);
+  const list = await call('GET', '/api/assistant/sessions', null, cookie);
+  assert.equal(list.json.sessions.length, 1, '被限流的请求不应新建会话');
+});
+
+test('助手工具：同一份 /api/state 下，get_today 的数字与接口逐项一致', async () => {
+  const { cookie } = await register('assist-tools@test.dev');
+  await call('PUT', '/api/goal', {
+    title: '考研数学', deadline: '2026-12-20', weeklyMinutes: 600, level: 'once',
+  }, cookie);
+  const { item } = (await call('POST', '/api/items', {
+    title: '高数第一章', subject: 'math', estimateMin: 120,
+  }, cookie)).json;
+
+  // 用「今天」写块，保证落在本周区间内（PUT /api/blocks 会校验 E1015）
+  const today = todayISO();
+  const cursor = new Date(`${today}T00:00:00Z`);
+  const weekStartDate = new Date(cursor);
+  weekStartDate.setUTCDate(cursor.getUTCDate() - ((cursor.getUTCDay() - 1 + 7) % 7));
+  const weekStart = weekStartDate.toISOString().slice(0, 10);
+
+  await call('PUT', '/api/blocks', {
+    weekStart,
+    blocks: [{
+      itemId: item.id, date: today, startMin: 540, endMin: 660, isBuffer: false,
+    }],
+  }, cookie);
+
+  const state = (await call('GET', '/api/state', null, cookie)).json;
+  const toolbox = createToolbox({ state, today });
+  const result = await toolbox.call('get_today', { date: today });
+
+  const expected = state.blocks.filter((block) => block.date === today && !block.isBuffer);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.data.blocks.length, expected.length);
+  assert.equal(
+    result.data.totalMin,
+    expected.reduce((acc, block) => acc + (block.endMin - block.startMin), 0),
+  );
+  assert.equal(result.data.blocks[0].title, '高数第一章');
+  assert.equal(result.data.blocks[0].estimateMin, 120, '估时要能从 items 关联出来');
 });
 
 test.after(async () => {

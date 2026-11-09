@@ -113,6 +113,51 @@ function migrate(db) {
       read_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at DESC);
+
+    -- 助手会话：deleted_at 非空即软删，30 天后由 purgeAssistantData 物理清理
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      mode TEXT,
+      citations TEXT,
+      tool_calls TEXT,
+      latency_ms INTEGER,
+      feedback TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
+
+    -- 指标与配额同表：day 是 Asia/Shanghai 自然日，配额按它计数，避免每次请求算时区
+    CREATE TABLE IF NOT EXISTS assistant_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT,
+      question TEXT NOT NULL,
+      mode TEXT,
+      tool_names TEXT,
+      degraded INTEGER NOT NULL DEFAULT 0,
+      first_token_ms INTEGER,
+      latency_ms INTEGER,
+      prompt_version TEXT,
+      feedback TEXT,
+      resolved_guess TEXT,
+      day TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_events_quota ON assistant_events(user_id, day);
   `);
 
   // 增量迁移：任务剩余工时（老库补列，默认取预估工时）

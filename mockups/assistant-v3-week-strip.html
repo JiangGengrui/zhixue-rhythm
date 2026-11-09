@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智学节律 · 助手面板（V3 周条带）预览</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #05080d;
+    --bg-2: #080d14;
+    --panel-bg: linear-gradient(180deg, rgba(255,255,255,.048), rgba(255,255,255,.016));
+    --panel-bg-flat: rgba(255,255,255,.035);
+    --line: rgba(255,255,255,.08);
+    --line-2: rgba(255,255,255,.16);
+    --ink: #e9f2f0;
+    --ink-2: #93a6b0;
+    --ink-3: #5d707a;
+    --mint: #2be6ae;
+    --cyan: #48c8ff;
+    --violet: #a98bff;
+    --amber: #f2b457;
+    --on-brand: #04120e;
+    --grad: linear-gradient(135deg, var(--mint), var(--cyan));
+    --brand-glow: 0 10px 28px rgba(43,230,174,.22);
+    --radius: 20px;
+    --radius-sm: 12px;
+    --rail-w: 236px;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --mono: 'SF Mono', ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--sans);
+    background:
+      radial-gradient(1200px 600px at 78% -10%, rgba(43,230,174,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(72,200,255,.08), transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .app { display: flex; height: 100vh; }
+
+  /* ── 左侧导航 ── */
+  .rail {
+    width: var(--rail-w); flex: 0 0 var(--rail-w);
+    border-right: 1px solid var(--line);
+    padding: 26px 18px; display: flex; flex-direction: column; gap: 26px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .02em; }
+  .brand i {
+    width: 26px; height: 26px; border-radius: 9px; background: var(--grad);
+    box-shadow: var(--brand-glow); display: block;
+  }
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+    color: var(--ink-2); text-decoration: none; font-size: 14px;
+  }
+  .nav a.on { color: var(--ink); background: rgba(255,255,255,.06); }
+  .nav a.on::before { content: ""; width: 3px; height: 16px; border-radius: 2px; background: var(--grad); }
+  .nav a:not(.on)::before { content: ""; width: 3px; height: 16px; }
+  .rail-foot { margin-top: auto; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+
+  /* ── 右侧主内容（背景层） ── */
+  .main { flex: 1; padding: 30px 34px; overflow: hidden; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; }
+  .head h1 { margin: 0; font-size: 22px; letter-spacing: .01em; }
+  .head .sub { color: var(--ink-3); font-size: 13px; margin-top: 6px; font-family: var(--mono); }
+  .kpis { display: flex; gap: 12px; }
+  .kpi {
+    min-width: 108px; padding: 14px 16px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); background: var(--panel-bg);
+  }
+  .kpi b { display: block; font-size: 22px; font-family: var(--mono); letter-spacing: -.02em; }
+  .kpi span { font-size: 11px; color: var(--ink-3); }
+  .kpi.mint b { color: var(--mint); }
+  .kpi.amber b { color: var(--amber); }
+
+  .rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel-bg-flat); }
+  .row { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 3px; background: var(--mint); }
+  .dot.b { background: var(--cyan); }
+  .dot.v { background: var(--violet); }
+  .row .t { flex: 1; font-size: 14px; color: var(--ink-2); }
+  .row .d { font-size: 12px; color: var(--ink-3); font-family: var(--mono); }
+  .row .st { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-3); }
+  .row .st.done { color: var(--mint); border-color: rgba(43,230,174,.3); background: rgba(43,230,174,.08); }
+
+  /* ── 助手浮层 ── */
+  .fab {
+    position: fixed; right: 28px; bottom: 28px; width: 48px; height: 48px; border-radius: 50%;
+    background: var(--grad); box-shadow: var(--brand-glow); display: grid; place-items: center;
+    color: var(--on-brand); font-size: 18px; font-weight: 700;
+  }
+  .panel {
+    position: fixed; right: 28px; bottom: 92px; width: 380px; height: 560px;
+    border-radius: var(--radius); border: 1px solid var(--line-2);
+    background: linear-gradient(180deg, #0b1319, #070c11 92%);
+    box-shadow: 0 28px 70px rgba(0,0,0,.62), 0 0 0 1px rgba(255,255,255,.03) inset;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .p-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); }
+  .p-head .ttl { font-size: 13.5px; font-weight: 620; }
+  .p-head .tag {
+    font-size: 10.5px; letter-spacing: .04em; color: var(--mint);
+    border: 1px solid rgba(43,230,174,.28); background: rgba(43,230,174,.09);
+    padding: 2px 7px; border-radius: 999px;
+  }
+  .p-head .x { margin-left: auto; color: var(--ink-3); font-size: 15px; line-height: 1; }
+
+  /* 周条带 */
+  .strip { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.012); }
+  .strip .cap { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-3); font-family: var(--mono); margin-bottom: 8px; }
+  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .day { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .day .lbl { font-size: 10px; color: var(--ink-3); }
+  .day .bar {
+    width: 100%; height: 56px; border-radius: 7px; border: 1px solid var(--line);
+    background: rgba(255,255,255,.03); display: flex; align-items: flex-end; overflow: hidden;
+  }
+  .day .fill { width: 100%; background: linear-gradient(180deg, rgba(43,230,174,.55), rgba(43,230,174,.18)); }
+  .day .h { font-size: 10px; font-family: var(--mono); color: var(--ink-2); }
+  .day.sel .lbl { color: var(--mint); }
+  .day.sel .bar { border-color: rgba(43,230,174,.55); box-shadow: 0 0 0 2px rgba(43,230,174,.12); }
+  .day.zero .h { color: var(--ink-3); }
+  .sel-note {
+    display: flex; align-items: center; gap: 6px; margin-top: 9px;
+    font-size: 11px; color: var(--ink-2);
+  }
+  .sel-note b { color: var(--mint); font-weight: 620; }
+  .sel-note .src { margin-left: auto; font-size: 10px; color: var(--ink-3); font-family: var(--mono); }
+
+  /* 消息 */
+  .msgs { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  .q { align-self: flex-end; max-width: 78%; padding: 8px 11px; border-radius: 12px 12px 3px 12px; font-size: 12.5px;
+       background: rgba(43,230,174,.12); border: 1px solid rgba(43,230,174,.24); color: #dffaf0; }
+  .a { align-self: flex-start; max-width: 88%; font-size: 12.5px; line-height: 1.62; color: var(--ink); }
+  .a .who { font-size: 10px; color: var(--ink-3); margin-bottom: 3px; letter-spacing: .04em; }
+  .a b { color: var(--mint); font-weight: 620; }
+  .a .cite {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; padding: 3px 8px; border-radius: 999px;
+    font-size: 10.5px; color: var(--cyan); border: 1px solid rgba(72,200,255,.26); background: rgba(72,200,255,.08);
+  }
+  .typing { display: inline-flex; gap: 4px; padding: 2px 0 0 2px; }
+  .typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); animation: b 1.1s infinite; }
+  .typing i:nth-child(2) { animation-delay: .16s; }
+  .typing i:nth-child(3) { animation-delay: .32s; }
+  @keyframes b { 0%,60%,100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+
+  /* 输入 */
+  .compose { padding: 10px 12px 12px; border-top: 1px solid var(--line); background: rgba(255,255,255,.014); }
+  .compose .box {
+    display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px;
+    border: 1px solid var(--line-2); border-radius: 12px; background: rgba(0,0,0,.28);
+  }
+  .compose .box .ph { flex: 1; font-size: 12px; color: var(--ink-3); }
+  .compose .box .send {
+    padding: 7px 13px; border-radius: 9px; font-size: 12px; font-weight: 620;
+    background: var(--grad); color: var(--on-brand);
+  }
+  .compose .hint { font-size: 10px; color: var(--ink-3); margin-top: 7px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><i></i>智学节律</div>
+    <nav class="nav">
+      <a href="#">今日</a>
+      <a href="#">目标</a>
+      <a href="#" class="on">周视图</a>
+      <a href="#">周报</a>
+      <a href="#">设置</a>
+    </nav>
+    <div class="rail-foot">2026 秋 · 第 11 周<br />目标 3 个 · 进行中 2 个</div>
+  </aside>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>本周 · 11/3 – 11/9</h1>
+        <div class="sub">还剩 7 项 · 4.5h</div>
+      </div>
+      <div class="kpis">
+        <div class="kpi mint"><b>62%</b><span>达成率 ↑8</span></div>
+        <div class="kpi"><b>+12m</b><span>偏差中位</span></div>
+        <div class="kpi amber"><b>41%</b><span>中断占比</span></div>
+      </div>
+    </div>
+    <div class="rows">
+      <div class="row"><i class="dot"></i><span class="t">英语 · 阅读真题 2 篇</span><span class="d">周三 19:00</span><span class="st done">已完成</span></div>
+      <div class="row"><i class="dot b"></i><span class="t">数学 · 线代第 3 章习题</span><span class="d">周四 20:30</span><span class="st">待开始</span></div>
+      <div class="row"><i class="dot v"></i><span class="t">政治 · 马原 2 节</span><span class="d">周五 09:00</span><span class="st">待开始</span></div>
+      <div class="row"><i class="dot"></i><span class="t">专业课 · 真题复盘</span><span class="d">周六 10:00</span><span class="st">待开始</span></div>
+    </div>
+  </main>
+</div>
+
+<div class="panel">
+  <div class="p-head">
+    <span class="ttl">助手</span>
+    <span class="tag">本周数据</span>
+    <span class="x">✕</span>
+  </div>
+
+  <div class="strip">
+    <div class="cap"><span>本周 11/3–11/9</span><span>点某天再问</span></div>
+    <div class="days">
+      <div class="day"><span class="lbl">一</span><div class="bar"><div class="fill" style="height:62%"></div></div><span class="h">3h</span></div>
+      <div class="day"><span class="lbl">二</span><div class="bar"><div class="fill" style="height:42%"></div></div><span class="h">2h</span></div>
+      <div class="day sel zero"><span class="lbl">三</span><div class="bar"></div><span class="h">0h</span></div>
+      <div class="day"><span class="lbl">四</span><div class="bar"><div class="fill" style="height:62%"></div></div><span class="h">3h</span></div>
+      <div class="day"><span class="lbl">五</span><div class="bar"><div class="fill" style="height:42%"></div></div><span class="h">2h</span></div>
+      <div class="day"><span class="lbl">六</span><div class="bar"><div class="fill" style="height:21%"></div></div><span class="h">1h</span></div>
+      <div class="day zero"><span class="lbl">日</span><div class="bar"></div><span class="h">0h</span></div>
+    </div>
+    <div class="sel-note">选中 <b>周三</b> · 可用 0 分钟 · 无待排任务<span class="src">已读 本周计划</span></div>
+  </div>
+
+  <div class="msgs">
+    <div class="q">周三为什么空着</div>
+    <div class="a">
+      <div class="who">助手</div>
+      周三当天可用时间是 <b>0 分钟</b>：周四的线代习题被挤到周三那格，但容量检查没通过，于是整天留空，不是漏排。
+      <span class="cite">周视图 › 周三</span>
+    </div>
+    <div class="q">那周四呢</div>
+    <div class="a">
+      <div class="who">助手</div>
+      周四 3 小时已排满 <b>4 项</b>，其中线代占 <b>1.5 小时</b>，是当周最长的一块。
+      <span class="cite">周视图 › 周四</span>
+    </div>
+    <div class="a"><div class="typing"><i></i><i></i><i></i></div></div>
+  </div>
+
+  <div class="compose">
+    <div class="box"><span class="ph">问本周的数据，或怎么用……</span><span class="send">发送</span></div>
+    <div class="hint"><span>Enter 发送 · Shift+Enter 换行</span><span>1/30</span></div>
+  </div>
+</div>
+
+<div class="fab">✦</div>
+</body>
+</html>
