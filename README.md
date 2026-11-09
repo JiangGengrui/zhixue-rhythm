@@ -4,7 +4,7 @@
 
 **把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-[在线体验](http://1d314887ba7340659327017e280bfae4.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
+[在线体验](https://zhixue-rhythm-343909-9-1412780291.sh.run.tcloudbase.com/) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
 ![version](https://img.shields.io/badge/version-1.3.1-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
@@ -64,6 +64,21 @@ npm start            # 构建 + 启动：# http://localhost:8787
 npm run server       # 终端 1：API + SQLite → :8787
 npm run dev          # 终端 2：Vite → :5173，/api 代理到 8787
 ```
+
+## 部署
+
+线上运行在腾讯云 CloudBase **云托管**（容器型），默认域名即上面的「在线体验」地址。仓库内已带好部署文件，无需额外配置：
+
+```bash
+# 容器化：多阶段构建，运行阶段只保留 dist/ 与 server/，无第三方运行时依赖
+Dockerfile
+.dockerignore            # 排除 node_modules / data / backups，避免本地数据进镜像
+cloudbaserc.json         # 目标环境与云托管服务名
+```
+
+服务以 `PORT=80`、`DB_FILE=/app/data/zhixue.db`、`MinNum=1 / MaxNum=1` 运行，前后端同域（`/api/*` 由同一容器提供），因此不需要配置 CORS 或 API 基地址。
+
+> ⚠️ 容器内 SQLite 为**实例本地存储**：重新部署会重置为全新空库，实例重启也可能丢失数据。演示够用；需要长期留存数据时，应把 `DB_FILE` 指向挂载的持久卷，或迁移到云数据库。
 
 ## 技术栈
 
@@ -131,6 +146,8 @@ app.html              学习空间（React 应用）
 docs/product/         PRD（V2.0）/ 技术架构设计 / 实施规划
 docs/openapi.yaml     API 契约
 docs/操作手册.md        启动、备份、回滚、排障
+Dockerfile            云托管容器镜像（多阶段构建）
+cloudbaserc.json      云托管环境与服务工作区配置
 ```
 
 ## 接口

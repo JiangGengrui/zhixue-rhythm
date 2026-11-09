@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.github
+.vite
+data
+backups
+artifacts
+*.log
+*.err
+*.db
+*.db-wal
+*.db-shm
+e2e.run.log
