@@ -192,7 +192,8 @@ test('服务端生成周计划：支持从指定日期起排，并保留完成�
   assert.equal(gen.status, 200, JSON.stringify(gen.json));
   assert.ok(gen.json.blocks.length > 0);
   for (const b of gen.json.blocks) assert.ok(b.date >= '2026-11-05', `排到了过去：${b.date}`);
-  assert.equal(gen.json.capacityMin, 870); // 整周容量（capacityMin 表示本周可用，from 只影响排程范围）
+  // 整周容量：默认七天都可用（120+150×5+120），from 只影响排程范围
+  assert.equal(gen.json.capacityMin, 990);
 
   const first = gen.json.blocks[0];
   // 只完成一半工时：剩余量会再次排入，且完成状态被保留
@@ -873,29 +874,57 @@ test('助手：A 类问题以 SSE 直答语料原文，并落库成两条消息'
   assert.deepEqual(list.json.sessions.map((s) => s.id), [r.meta.sessionId]);
 });
 
-test('助手：数据类问题在无 Key 时回固定降级文案，数字个数为 0', async () => {
+test('助手：无 Key 时数据类问题用工具事实本地汇总，不再回「取不到数据」', async () => {
   const { cookie } = await register('assist-data@test.dev');
-  const r = await chat('我这周还剩多少任务', cookie);
+  await call('PUT', '/api/goal', {
+    title: '考研', deadline: '2026-12-19', weeklyMinutes: 900, level: 'once',
+  }, cookie);
+  for (const title of ['高数 40 题', '408 二叉树']) {
+    await call('POST', '/api/items', { title, subject: 'major', estimateMin: 120, weight: 5 }, cookie);
+  }
+  const today = todayISO();
+  const base = new Date(`${today}T00:00:00Z`);
+  const monday = new Date(base.getTime() - ((base.getUTCDay() + 6) % 7) * 86400000);
+  const weekStart = monday.toISOString().slice(0, 10);
+  const gen = await call('POST', '/api/plan/generate', { weekStart, from: today }, cookie);
+  assert.equal(gen.status, 200, JSON.stringify(gen.json));
+  assert.ok(gen.json.blocks.length > 0, '先要有计划，摘要才有数字可讲');
+
+  const question = '我这周还剩多少任务';
+  const r = await chat(question, cookie);
 
   assert.equal(r.status, 200);
   assert.equal(r.meta.mode, 'data');
-  assert.equal(r.meta.degraded, true);
-  assert.equal(r.text, DEGRADED_DATA_TEXT);
-  assert.equal(/\d/.test(r.text), false, '降级文案里的数字会被当成结论，必须一个都没有');
+  // 摘要是拿实时数据算出来的，不该标成降级；但要让前端知道这不是模型写的
+  assert.equal(r.done.degraded, false, '本地摘要用了真实数据，不是降级');
+  assert.equal(r.done.localSummary, true);
+  assert.notEqual(r.text, DEGRADED_DATA_TEXT);
+  assert.match(r.text, /本周/, `摘要要说明是哪一周：${r.text}`);
+  assert.match(r.text, /\d/, '摘要必须带真实数字，否则等于没说');
 
-  // 降级也是一次完整回答：照样落库、照样计配额
+  // 摘要也是一次完整回答：照样落库、照样计配额
   const detail = await call('GET', `/api/assistant/sessions/${r.meta.sessionId}`, null, cookie);
   assert.equal(detail.json.messages[1].mode, 'data');
-  assert.equal(detail.json.messages[1].content, DEGRADED_DATA_TEXT);
+  assert.equal(detail.json.messages[1].content, r.text);
 
   // 工具确实跑过并记进事件：没有这段记录，出问题时无法判断是「没取到数据」还是「模型没用好」
   const event = app.db.prepare(
     'SELECT tool_names, mode, degraded FROM assistant_events WHERE question = ? ORDER BY id DESC LIMIT 1',
-  ).get('我这周还剩多少任务');
+  ).get(question);
   assert.equal(event.mode, 'data');
-  assert.equal(event.degraded, 1);
+  assert.equal(event.degraded, 0);
   const toolNames = JSON.parse(event.tool_names ?? '[]');
   assert.ok(toolNames.includes('get_week'), `实际工具：${event.tool_names}`);
+});
+
+test('助手：没有任何数据时，本地摘要引导建目标而不是说取不到', async () => {
+  const { cookie } = await register('assist-empty@test.dev');
+  const r = await chat('我今天要做什么', cookie);
+
+  assert.equal(r.meta.mode, 'data');
+  assert.equal(r.done.localSummary, true);
+  assert.match(r.text, /还没有设置目标|没有排任务/, `空数据也要说清楚缺什么：${r.text}`);
+  assert.notEqual(r.text, DEGRADED_DATA_TEXT);
 });
 
 test('助手：故障注入三条路径（无 Key / 上游 500 / 超时）都落到同一降级文案', async () => {
@@ -917,17 +946,28 @@ test('助手：故障注入三条路径（无 Key / 上游 500 / 超时）都落
 
       assert.equal(r.status, 200, `${kind} 不应把故障变成 HTTP 错误`);
       assert.equal(r.meta.mode, 'data');
-      assert.equal(r.text, DEGRADED_DATA_TEXT, `${kind} 应回固定降级文案`);
-      assert.equal(/\d/.test(r.text), false, `${kind} 的文案里不能出现数字`);
       // meta 是开口前的判断，done 才是最终结果；上游中途失败只有 done 里才准
-      assert.equal(r.done.degraded, true, `${kind} 的 done 必须标记降级`);
       assert.deepEqual(r.done.citations, []);
       assert.equal(r.events.some((e) => e.event === 'error'), false, '不能把上游细节写进流里');
 
       const event = kindOf(question);
-      assert.equal(event.degraded, 1);
       // 降级发生在「模型这一段」：工具事实照常取到，否则测的就不是降级链
       assert.ok(JSON.parse(event.tool_names ?? '[]').length > 0, `${kind} 应已取到工具事实`);
+
+      if (kind === 'nokey') {
+        // 没配 Key 时工具事实是完整的：直接本地汇总，答出真实数字，不算降级
+        assert.equal(r.done.degraded, false, 'nokey 有事实可讲，不该标降级');
+        assert.equal(r.done.localSummary, true);
+        assert.notEqual(r.text, DEGRADED_DATA_TEXT);
+        assert.match(r.text, /目标|周/, `摘要要讲事实：${r.text}`);
+        assert.equal(event.degraded, 0);
+      } else {
+        // 上游 500 / 超时：一句带数字的正文都会变成编造的结论，只能回固定降级文案
+        assert.equal(r.text, DEGRADED_DATA_TEXT, `${kind} 应回固定降级文案`);
+        assert.equal(/\d/.test(r.text), false, `${kind} 的文案里不能出现数字`);
+        assert.equal(r.done.degraded, true, `${kind} 的 done 必须标记降级`);
+        assert.equal(event.degraded, 1);
+      }
     }
   } finally {
     delete process.env.ASSISTANT_FAULT;
@@ -936,7 +976,8 @@ test('助手：故障注入三条路径（无 Key / 上游 500 / 超时）都落
   // 开关关掉后恢复正常：同一账号再问不会继承上一次的降级
   const normal = await chat('这周还剩多少任务（恢复）', cookie);
   assert.equal(normal.meta.mode, 'data');
-  assert.equal(normal.meta.degraded, true, '本机无真实 Key，仍走无 Key 降级');
+  assert.equal(normal.done.localSummary, true, '本机无真实 Key，开关关掉后回到本地摘要');
+  assert.equal(normal.done.degraded, false);
 });
 
 test('助手：未命中语料返回兜底文案且无引用', async () => {

@@ -4,6 +4,7 @@ import { DEGRADED_DATA_TEXT, PROMPT_VERSION, buildRequestMessages } from './prom
 import {
   DEFAULT_FIRST_TOKEN_MS, LlmError, llmConfig, streamChatCompletion,
 } from './llm.mjs';
+import { summarizeFacts } from './summary.mjs';
 
 /** 提示词版本：改 system 模板必须改它（SPEC §8、DECISIONS D8.2） */
 export { PROMPT_VERSION };
@@ -226,7 +227,11 @@ export async function streamModelReply({
   // 拿 null 当数据让模型自由发挥，等于把不可验收的编造放进回答。
   const hasFacts = facts !== undefined && facts !== null;
   const canUseModel = config.apiKey.length > 0 && hasFacts;
-  let degraded = !canUseModel;
+  // 没配 Key（或上游不可用）不等于没答案：工具事实已经在手，用固定模板讲出来。
+  // 以前这里一律回「暂时取不到你的数据」，线上没配 Key 时整个数据问答等于不可用。
+  const localText = canUseModel ? '' : summarizeFacts(facts);
+  let degraded = !canUseModel && !localText;
+  let localSummary = false;
   let incomplete = false;
   let text = '';
   let firstTokenAt = null;
@@ -281,6 +286,10 @@ export async function streamModelReply({
         emitAll(DEGRADED_DATA_TEXT);
       }
     }
+  } else if (localText) {
+    // 本地摘要就是最终答案，不算降级：它确实用了用户的实时数据
+    localSummary = true;
+    emitAll(localText);
   } else {
     emitAll(DEGRADED_DATA_TEXT);
   }
@@ -300,6 +309,10 @@ export async function streamModelReply({
     promptVersion,
     firstTokenAt,
     startedAt,
-    extra: incomplete ? { incomplete: true } : {},
+    extra: {
+      ...(incomplete ? { incomplete: true } : {}),
+      // 告诉前端这句是「按数据直接汇总」，不是模型写的，可以据此少显示「未接入模型」的提示
+      ...(localSummary ? { localSummary: true } : {}),
+    },
   });
 }

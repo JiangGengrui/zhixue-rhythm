@@ -42,6 +42,29 @@ export const DATA_PRONOUNS = [
   '完不成',
 ];
 
+// 取数关键词按「问的是哪块数据」分组：`planTools` 用它们选工具，
+// `hasDataSignal` 用它们判断「知识库没命中时该不该改问数据」，两边共用一份，避免漂移。
+const GOAL_WORDS = ['目标', '可行', '来不来得及', '还来得及', 'R值'];
+const TODAY_WORDS = ['今天', '今日'];
+const REPORT_WORDS = ['这周', '本周', '周报', '达成率', '完成率', '偏差', '归因', '打卡', '记录', '进度'];
+const CAPACITY_WORDS = ['可用时间', '能学多久', '排满', '空着'];
+
+/**
+ * 问题里有没有明确的「问自己数据」的信号。
+ *
+ * 用于知识库未命中时的回落判断：「今天做了多久」没有 §5.1.1 的指代词，
+ * 但含 `今天`，应该改问数据；「帮我写首诗」没有任何信号，仍走兜底文案。
+ */
+export function hasDataSignal(question) {
+  const text = String(question ?? '');
+  if (!text) return false;
+  return (
+    [...GOAL_WORDS, ...TODAY_WORDS, ...REPORT_WORDS, ...CAPACITY_WORDS].some((word) => text.includes(word))
+    || text.includes('还剩')
+    || text.includes('剩多少')
+  );
+}
+
 /**
  * 一次提问要调哪几个只读工具（SPEC R3：单次 ≤3 次）。
  *
@@ -57,13 +80,13 @@ export function planTools(question) {
   const primary = [];
   const context = new Set();
 
-  if (has('目标', '可行', '来不来得及', '还来得及', 'R值')) primary.push('get_goal');
-  if (has('今天', '今日')) primary.push('get_today');
-  if (has('这周', '本周', '周报', '达成率', '完成率', '偏差', '归因')) {
+  if (has(...GOAL_WORDS)) primary.push('get_goal');
+  if (has(...TODAY_WORDS)) primary.push('get_today');
+  if (has(...REPORT_WORDS)) {
     primary.push('get_report');
     context.add('get_week');
   }
-  if (has('可用时间', '能学多久', '排满', '空着')) {
+  if (has(...CAPACITY_WORDS)) {
     primary.push('get_settings');
     context.add('get_week');
   }

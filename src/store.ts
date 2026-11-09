@@ -3,12 +3,12 @@ import { api, ApiError } from './data/api';
 import { clearSnapshot, enqueue, isOfflineError, loadOps, loadSnapshot, removeOp, saveSnapshot } from './data/offlineQueue';
 import type { StatusPatch } from './data/offlineQueue';
 import type { DecomposeResponse, ReplanOptionView, ReplanResponse, SessionUser } from './data/api';
-import { addDays, todayISO, weekDates } from './domain/date';
+import { addDays, startOfWeek, todayISO, weekDates } from './domain/date';
 import type { Block, BlockStatus, Goal, GoalTemplate, PlanItem, Settings } from './domain/types';
 
 export const defaultSettings: Settings = {
   weekStart: 1,
-  weekdays: [0, 150, 150, 150, 150, 150, 120],
+  weekdays: [120, 150, 150, 150, 150, 150, 120],
 };
 
 export type Phase = 'loading' | 'guest' | 'ready' | 'error' | 'offline';
@@ -487,6 +487,13 @@ export function useAppState() {
 
   const seedDemo = useCallback(async () => {
     await run(async () => {
+      const before = await api.state();
+      // 示例数据要能立刻看到「一整周」的节奏：旧默认把周日设成 0 分钟，
+      // 排程再算也排不到周日，看起来就像只填了周一到周五。
+      // 只在这一周还有整天空白时才改，避免覆盖用户自己调过的时间。
+      if (before.settings.weekdays.some((m) => m === 0)) {
+        await api.putSettings({ ...before.settings, weekdays: [120, 150, 150, 150, 150, 150, 120] });
+      }
       await api.putGoal({
         title: '2027 考研 · 计算机科学',
         deadline: '2026-12-19',
@@ -502,8 +509,16 @@ export function useAppState() {
         { title: '政治 · 马原第一章', subject: 'politics', estimateMin: 60, weight: 2 },
         { title: '英语 · 长难句 5 句', subject: 'english', estimateMin: 45, weight: 3 },
         { title: '408 · 排序算法复习', subject: 'major', estimateMin: 75, weight: 3 },
+        // 上面合计 660 分钟，只够填满 4 天半；补到 900 分钟才铺得满一周
+        { title: '数学 · 概率论 50 题', subject: 'math', estimateMin: 60, weight: 4 },
+        { title: '英语 · 单词复盘 200 个', subject: 'english', estimateMin: 60, weight: 3 },
+        { title: '政治 · 近代史纲要 第二章', subject: 'politics', estimateMin: 60, weight: 2 },
+        { title: '408 · 进程调度与死锁', subject: 'major', estimateMin: 60, weight: 5 },
       ];
       for (const d of drafts) await api.addItem(d);
+      // 加完任务立刻排一遍：否则「今日」「周」「助手」看到的都是一个空周
+      const week = startOfWeek(todayISO(), before.settings.weekStart ?? 1);
+      await api.generatePlan(week, todayISO(), 'rebuild');
       await load();
     });
   }, [run, load]);

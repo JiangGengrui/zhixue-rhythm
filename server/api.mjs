@@ -8,7 +8,7 @@ import {
 } from './assistant/sessions.mjs';
 import { answerFromKnowledge } from './assistant/retrieval.mjs';
 import { MAX_QUESTION_CHARS, streamModelReply, streamReply } from './assistant/chat.mjs';
-import { classify, planTools } from './assistant/route.mjs';
+import { classify, hasDataSignal, planTools } from './assistant/route.mjs';
 import { buildFacts, createToolbox } from './assistant/tools.mjs';
 import { applyFault, resolveFault } from './assistant/faults.mjs';
 import { isLlmConfigured } from './assistant/llm.mjs';
@@ -241,7 +241,7 @@ export function createApi(db) {
       const recoveryCode = generateRecoveryCode();
       q.insertUser.run(
         id, email, name, hashPassword(password), hashRecoveryCode(recoveryCode),
-        '[0,150,150,150,150,150,120]', nowISO(),
+        '[120,150,150,150,150,150,120]', nowISO(),
       );
       if (becomeAdmin) db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(id);
       const user = q.userById.get(id);
@@ -897,7 +897,14 @@ export function createApi(db) {
       const focusDate = isISODate(body?.date) ? body.date : undefined;
 
       // B 类：先取只读工具事实，再让模型把数字讲顺；取不到事实就不调模型（DECISIONS D9.2）
-      if (classify(question) === 'data') {
+      //
+      // 「今天做了多久」「这周排了多少分钟」不含 §5.1.1 的指代词，但明显是在问自己的数据。
+      // 判定顺序仍是「指代词 → B、检索命中 → A、其余兜底」，只是兜底时先看有没有数据可讲：
+      // 知识库检索不到就直接取数回答，而不是回一句「这个问题我暂时没有把握」。
+      const knowledge = classify(question) === 'data' ? null : answerFromKnowledge(question);
+      // 只有「知识库没命中 + 问法里有取数信号」才改走 B 类：
+      // 否则「帮我写首诗」也会被拉去查数据，回一段无关的周计划
+      if (knowledge === null || (knowledge.mode === 'fallback' && hasDataSignal(question))) {
         // today 换成所选日期：get_today 取的是那天，「今天做了多久」才不会答成今天
         const toolbox = createToolbox({ state: stateOf(user), today: focusDate });
         const names = planTools(question);
@@ -925,14 +932,13 @@ export function createApi(db) {
       }
 
       // A 类不调模型：正文就是语料 answer 原文，可逐字比对（SPEC R2）
-      const answer = answerFromKnowledge(question);
       await streamReply({
         res,
         store: chat,
         userId: user.id,
         question,
         sessionId: session.id,
-        answer,
+        answer: knowledge,
         // 与 B 类同一套判定：空串 / 纯空格的 Key 都算「没配」，避免前端显示成已接入模型
         degraded: !isLlmConfigured(),
       });

@@ -2,7 +2,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const DEFAULT_WEEKDAYS = JSON.stringify([0, 150, 150, 150, 150, 150, 120]);
+// 一周七天都给可用时间：周日原本是 0，导致排程永远排不到周日，
+// 8 个任务的一周计划看起来像「只填了周一到周五」。
+const DEFAULT_WEEKDAYS = JSON.stringify([120, 150, 150, 150, 150, 150, 120]);
 
 export function openDb(file) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
@@ -203,6 +205,11 @@ function migrate(db) {
   if (!cols.some((c) => c.name === 'remaining_min')) {
     db.exec('ALTER TABLE items ADD COLUMN remaining_min INTEGER');
   }
+
+  // 数据修正：旧默认把周日写成 0 分钟，排程永远排不到周日。
+  // 只改仍是旧默认值的账号，用户自己调过可用时间的不动。
+  db.prepare('UPDATE users SET weekdays = ? WHERE weekdays = ?')
+    .run(DEFAULT_WEEKDAYS, '[0,150,150,150,150,150,120]');
 }
 
 export const nowISO = () => new Date().toISOString();
