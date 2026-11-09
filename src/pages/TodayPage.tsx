@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Empty, IconCheck, Meter, Panel, Ring, Stat } from '../components';
+import { Button, Empty, IconCheck, Panel, Ring, Stat } from '../components';
 import { addDays, daysBetween, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import { SUBJECT_LABEL } from '../domain/types';
 import type { Block } from '../domain/types';
@@ -243,6 +243,7 @@ export function TodayPage({
             </Button>
           )}
         </div>
+        {renderDoneForm(b)}
       </li>
     );
   }
@@ -328,7 +329,7 @@ export function TodayPage({
 
           <Panel
             title="今日执行"
-            desc="点「开始」开始计时，可随时暂停；完成时填实际用时与完成度"
+            desc="点「开始」计时，完成时填实际用时"
             action={<span className="pill tone-quiet">{blocks.length} 块</span>}
           >
             {blocks.length === 0 ? (
@@ -336,8 +337,8 @@ export function TodayPage({
                 title="今天没有安排"
                 desc={
                   weekBlockCount > 0
-                    ? `本周已排 ${weekBlockCount} 项，但今天（${WEEKDAY_LABEL[weekdayOf(today)]}）没有时段。到「周视图」可以调整或重排。`
-                    : '如果本周其他日子有未完成任务，可在下方补打卡；也可以生成本周计划。'
+                    ? `本周已排 ${weekBlockCount} 项，今天（${WEEKDAY_LABEL[weekdayOf(today)]}）没有时段。`
+                    : '可以生成本周计划，或到「周视图」手动安排。'
                 }
                 action={
                   <Button variant="primary" disabled={busy} onClick={() => void generate()}>
@@ -400,7 +401,7 @@ export function TodayPage({
             </Panel>
           )}
 
-          <Panel title="明天之后" desc="提前看一眼，避免临时赶工">
+          <Panel title="接下来两天">
             <div className="forecast">
               {[1, 2].map((offset) => {
                 const date = addDays(today, offset);
@@ -423,13 +424,6 @@ export function TodayPage({
                   </div>
                 );
               })}
-            </div>
-            <div className="meter-row" style={{ marginTop: 16 }}>
-              <span>今日进度</span>
-              <Meter value={done.length} max={Math.max(1, blocks.length)} />
-              <span className="mono">
-                {blocks.length === 0 ? '—' : `${Math.round((done.length / blocks.length) * 100)}%`}
-              </span>
             </div>
           </Panel>
         </div>

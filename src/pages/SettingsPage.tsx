@@ -68,10 +68,9 @@ export function SettingsPage({
 
       <div className="grid-main">
         <div className="col">
-          <Panel title="每周可用时间" desc="排程只会使用这些时段；周末留白也是一种选择">
+          <Panel title="每周可用时间" desc="排程只在以下时段内安排">
             <div className="stat-row" style={{ marginBottom: 16 }}>
               <Stat label="每周合计" value={(totalMinutes / 60).toFixed(1)} unit="小时" />
-              <Stat label="每日上限" value="24" unit="小时" />
               <Stat
                 label="周末占比"
                 value={totalMinutes > 0 ? String(Math.round(((hours[0]! + hours[6]!) * 60 / totalMinutes) * 100)) : '—'}
@@ -166,11 +165,10 @@ export function SettingsPage({
             </div>
           </Panel>
 
-          <Panel title="账号与数据" desc="数据保存在服务端，按账号隔离，可随时导出带走">
+          <Panel title="账号与数据" desc="按账号隔离，可随时导出">
             <ul className="bullets">
               <li>当前账号：{state.user?.name}（{state.user?.email}）</li>
               <li>会话有效期 30 天，退出后需重新登录。</li>
-              <li>删除计划项会同时清理其在本周的任务块，已完成的记录不再计入周报。</li>
             </ul>
 
             <div className="row" style={{ marginTop: 14 }}>
@@ -220,19 +218,16 @@ export function SettingsPage({
         </div>
 
         <div className="col">
-          <Panel title="外观" desc="深色与浅色共用同一套设计令牌">
+          <Panel title="外观">
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div>
                 <b style={{ fontSize: 13 }}>{theme === 'dark' ? '深空' : '冷光'}</b>
                 <p className="muted" style={{ marginTop: 4 }}>
-                  {theme === 'dark' ? '深空仪表盘，适合夜间与长时间专注' : '冷光实验室，适合白天与明亮环境'}
+                  {theme === 'dark' ? '适合夜间与长时间专注' : '适合白天与明亮环境'}
                 </p>
               </div>
               <ThemeToggle theme={theme} onToggle={onToggleTheme} />
             </div>
-            <p className="advice" style={{ marginTop: 14 }}>
-              偏好会保存在本机，下次打开自动生效。
-            </p>
           </Panel>
 
           <Panel title="会话" desc="30 天免登录">

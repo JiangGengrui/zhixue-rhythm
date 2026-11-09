@@ -93,16 +93,22 @@ describe('feasibility', () => {
 describe('packWeek', () => {
   const weekStart = '2026-11-02';
 
-  it('按权重优先装入常规容量，时间连续且不重叠', () => {
+  it('多任务按天均衡推进：第一天就有多个任务，且互不重叠', () => {
     const packed = packWeek([item('low', 60, 1), item('high', 120, 5)], settings, weekStart);
-    expect(packed.blocks).toHaveLength(2);
+    // 权重高的先排，但不会把当天容量吃光
     expect(packed.blocks[0]!.itemId).toBe('high');
     expect(packed.blocks[0]!.date).toBe('2026-11-02');
     expect(packed.blocks[0]!.startMin).toBe(19 * 60);
-    expect(packed.blocks[0]!.endMin).toBe(21 * 60);
-    // 当天常规容量已用满，第二项顺延到次日同一起始时间
-    expect(packed.blocks[1]!.date).toBe('2026-11-03');
-    expect(packed.blocks[1]!.startMin).toBe(19 * 60);
+    // 第一天就同时推进了两个任务，而不是把第二个挤到次日
+    const day0 = packed.blocks.filter((b) => b.date === '2026-11-02');
+    expect(day0.map((b) => b.itemId).sort()).toEqual(['high', 'low']);
+    // 全部块按时间升序、首尾相接、不重叠
+    for (let i = 1; i < packed.blocks.length; i++) {
+      const prev = packed.blocks[i - 1]!;
+      const cur = packed.blocks[i]!;
+      if (cur.date === prev.date) expect(cur.startMin).toBeGreaterThanOrEqual(prev.endMin);
+      else expect(cur.date > prev.date).toBe(true);
+    }
     expect(packed.capacityMin).toBe(600);
     expect(packed.plannedMin).toBe(180);
     expect(packed.overflow).toHaveLength(0);
@@ -128,10 +134,10 @@ describe('packWeek', () => {
 
   it('总容量不足时溢出剩余量并给出建议', () => {
     const packed = packWeek([item('huge', 700)], settings, weekStart);
-    // 常规容量 510 用满；剩余 190 超过单日弹性位，不切片 → 整体溢出
-    expect(packed.plannedMin).toBe(510);
+    // 常规容量 510 + 弹性位 90 全部用满，剩余 100 溢出
+    expect(packed.plannedMin).toBe(600);
     expect(packed.overflow).toHaveLength(1);
-    expect(packed.overflow[0]!.remainingMin).toBe(190);
+    expect(packed.overflow[0]!.remainingMin).toBe(100);
     expect(packed.suggestions.join('')).toContain('差');
   });
 
@@ -174,6 +180,46 @@ describe('packWeek', () => {
     expect(packed.capacityMin).toBe(0);
     expect(packed.overflow).toHaveLength(1);
     expect(packed.suggestions.join('')).toContain('没有可用时段');
+  });
+
+  it('单个大任务不会独占整周，其余任务每天都能推进', () => {
+    const items = [item('big', 889, 5), item('m2', 420, 5), item('m3', 300, 4), item('m4', 260, 4)];
+    const packed = packWeek(items, settings, weekStart);
+    const dates = new Set(packed.blocks.map((b) => b.date));
+    expect(dates.size).toBeGreaterThan(3);
+    for (const id of ['big', 'm2', 'm3', 'm4']) {
+      expect(packed.blocks.some((b) => b.itemId === id)).toBe(true);
+    }
+    // 任何一天都不该只推进一个任务
+    for (const d of dates) {
+      expect(new Set(packed.blocks.filter((b) => b.date === d).map((b) => b.itemId)).size).toBeGreaterThan(1);
+    }
+  });
+
+  it('每天可排时长较大时自动提前开始，不越过 24:00', () => {
+    const longDay: Settings = { weekStart: 1, weekdays: [0, 360, 360, 360, 360, 360, 360] };
+    const packed = packWeek([item('x', 600, 5)], longDay, weekStart);
+    for (const b of packed.blocks) {
+      expect(b.endMin).toBeLessThanOrEqual(24 * 60);
+      expect(b.startMin).toBeGreaterThanOrEqual(18 * 60);
+      expect(b.endMin - b.startMin).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it('fill 生成时避开已有占用，不产生重叠', () => {
+    const packed = packWeek([item('n', 90, 3)], settings, weekStart, weekStart, {
+      busy: [{ date: weekStart, startMin: 19 * 60, endMin: 20 * 60 + 30 }],
+    });
+    expect(packed.blocks[0]!.date).toBe(weekStart);
+    expect(packed.blocks[0]!.startMin).toBe(20 * 60 + 30);
+  });
+
+  it('块 id 可由调用方注入，避免与已保留块撞主键', () => {
+    let n = 0;
+    const packed = packWeek([item('a', 60, 5)], settings, weekStart, weekStart, {
+      makeId: () => `custom_${n++}`,
+    });
+    expect(packed.blocks[0]!.id).toBe('custom_0');
   });
 });
 

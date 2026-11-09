@@ -136,7 +136,7 @@ export function ReportPage({ state }: { state: AppState }) {
                 </div>
               </section>
 
-              <Panel title="偏差归因" desc="容量、中断、估时三类，占比合计 100%">
+              <Panel title="偏差归因" desc="三类原因占比">
                 <div className="causes">
                   <div className="stack-bar">
                     {report.causes.map((c) => (
@@ -157,32 +157,17 @@ export function ReportPage({ state }: { state: AppState }) {
                       </div>
                     ))}
                   </div>
-                  <p className="muted" style={{ lineHeight: 1.7 }}>
-                    归因只统计本周真实记录：容量是排不下、中断是执行中放弃、估时是实际用时的偏长。
-                  </p>
                 </div>
               </Panel>
             </div>
 
             <div className="col">
-              <Panel className="insight-card" title="下周建议" desc="由归因结果生成">
+              <Panel className="insight-card" title="下周建议">
                 <p className="advice big">{report.suggestion}</p>
-                <ul className="bullets" style={{ marginTop: 14 }}>
-                  <li>偏差中位数代表系统性乐观/悲观程度。</li>
-                  <li>P90 代表最坏 10% 的情况，用来定弹性位。</li>
-                </ul>
               </Panel>
 
-              <Panel title="本周关键数字">
+              <Panel title="本周其他数字">
                 <div className="stack-tight">
-                  <div className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="muted">计划时长</span>
-                    <b className="mono">{fmtDuration(report.plannedMin)}</b>
-                  </div>
-                  <div className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="muted">有效时长</span>
-                    <b className="mono">{fmtDuration(report.effectiveMin)}</b>
-                  </div>
                   <div className="row" style={{ justifyContent: 'space-between' }}>
                     <span className="muted">跳过 / 中断</span>
                     <b className="mono">{report.skippedCount} 项</b>
@@ -190,6 +175,10 @@ export function ReportPage({ state }: { state: AppState }) {
                   <div className="row" style={{ justifyContent: 'space-between' }}>
                     <span className="muted">偏差样本</span>
                     <b className="mono">{report.deviation.count} 条</b>
+                  </div>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <span className="muted">补录条数</span>
+                    <b className="mono">{report.backfillCount} 条</b>
                   </div>
                 </div>
               </Panel>

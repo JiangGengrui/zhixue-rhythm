@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Empty, Field, Meter, Panel } from '../components';
+import { Button, Empty, Field, Meter, Modal, Panel } from '../components';
 import { packWeek } from '../domain/engine';
 import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import type { AppState, Actions } from '../store';
@@ -20,6 +20,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
   const [replanData, setReplanData] = useState<ReplanResponse | null>(null);
   const [replanBusy, setReplanBusy] = useState(false);
   const [replanMsg, setReplanMsg] = useState('');
+  const [replanOpen, setReplanOpen] = useState(false);
   // 用户点过「生成」后不再展示预览，避免删空后预览块又冒出来
   const [everGenerated, setEverGenerated] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -42,13 +43,13 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
     [items],
   );
 
-  const packed = useMemo(
-    () => packWeek(pendingItems, state.settings, weekStart),
-    [pendingItems, state.settings, weekStart],
-  );
-
   const dates = weekDates(weekStart);
   const today = todayISO();
+  // 预览要和服务端保持一致：周中生成时从今天开始排，不排已经过去的日期
+  const packed = useMemo(
+    () => packWeek(pendingItems, state.settings, weekStart, weekStart < today ? today : weekStart),
+    [pendingItems, state.settings, weekStart, today],
+  );
   const isCurrentWeek = weekStart === startOfWeek(today, state.settings.weekStart);
   const saved = state.blocks.filter((b) => dates.includes(b.date));
   const hasSaved = saved.length > 0;
@@ -69,14 +70,16 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
 
   /** 排程统一入口：fill 只补没有块的任务，rebuild 清掉未完成块后整周重排 */
   async function runGenerate(mode: 'fill' | 'rebuild') {
-    if (mode === 'rebuild' && hasSaved && !confirm('重新安排这一周？已完成的任务块会保留，其余会重新分配时间。')) return;
+    // 非本周（还没排过的周）一律整周重排：fill 只补缺，对空周会直接返回 0
+    const effMode: 'fill' | 'rebuild' = isCurrentWeek ? mode : 'rebuild';
+    if (effMode === 'rebuild' && hasSaved && !confirm('重新安排这一周？已完成的任务块会保留，其余会重新分配时间。')) return;
     setBusy(true);
-    setNotice(mode === 'rebuild' ? '正在重新排程…' : '正在排程…');
+    setNotice(effMode === 'rebuild' ? '正在重新排程…' : '正在排程…');
     try {
-      const added = await actions.generateWeek(weekStart, mode);
+      const added = await actions.generateWeek(weekStart, effMode);
       setEverGenerated(true);
       if (added > 0) {
-        setNotice(mode === 'rebuild' ? `已重排：排入 ${added} 个任务块` : `已补排 ${added} 个任务块`);
+        setNotice(effMode === 'rebuild' ? `已重排：排入 ${added} 个任务块` : `已补排 ${added} 个任务块`);
       } else if (noRoomLeft && isCurrentWeek) {
         setNotice('这一周从今天起已经排不出时间了，可用上方「为下周生成」');
       } else {
@@ -115,6 +118,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
     try {
       const count = await actions.applyReplan(weekStart, key);
       setReplanData(null);
+      setReplanOpen(false);
       setReplanMsg(`已采用「${label}」，这是本周第 ${count} 次重排`);
       setNotice(`已应用「${label}」`);
     } catch (err) {
@@ -176,6 +180,14 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
           <Button onClick={() => setWeekStart(startOfWeek(todayISO(), state.settings.weekStart))}>本周</Button>
           <Button className="btn-icon" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="下一周">
             ›
+          </Button>
+          <Button
+            onClick={() => {
+              setReplanOpen(true);
+              void checkReplan();
+            }}
+          >
+            重排建议
           </Button>
           <Button variant="primary" disabled={busy} onClick={() => void runGenerate(hasSaved ? 'rebuild' : 'fill')}>
             {busy ? '排程中…' : hasSaved ? '重新排这一周' : '生成本周计划'}
@@ -280,13 +292,19 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
         </div>
       </Panel>
 
-      <Panel
+      <Modal
+        open={replanOpen}
         title="重排建议"
-        desc="按「顺延 → 压缩 → 替代 → 放弃」给出方案，每个方案都标明代价与未来 7 天负载增幅"
-        action={
-          <Button variant="ghost" size="sm" disabled={replanBusy} onClick={() => void checkReplan()}>
-            {replanBusy ? '评估中…' : '评估是否需要重排'}
-          </Button>
+        desc="容量不足时给出可选调整，采用后本周未完成的任务会重新安排"
+        width={760}
+        onClose={() => setReplanOpen(false)}
+        footer={
+          <>
+            <Button variant="quiet" disabled={replanBusy} onClick={() => void checkReplan()}>
+              {replanBusy ? '评估中…' : '重新评估'}
+            </Button>
+            <Button onClick={() => setReplanOpen(false)}>关闭</Button>
+          </>
         }
       >
         {replanMsg && <p className="notice">{replanMsg}</p>}
@@ -345,7 +363,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
             )}
           </>
         )}
-      </Panel>
+      </Modal>
 
       {noRoomLeft && isCurrentWeek && (
         <div className="hint-bar">
@@ -356,7 +374,7 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
             onClick={() => {
               const next = addDays(weekStart, 7);
               setWeekStart(next);
-              void actions.generateWeek(next).then((added) =>
+              void actions.generateWeek(next, 'rebuild').then((added) =>
                 setNotice(added > 0 ? `已为 ${next} 那周生成 ${added} 个任务块` : '下周也没有可用时段，请先到「设置」调整每日可用时间'),
               );
             }}
@@ -375,9 +393,11 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
       )}
 
       {editing && (
-        <Panel
+        <Modal
+          open
           title="调整任务时间"
-          desc={`${itemMap.get(editing.itemId)?.title ?? '任务'} · 时长 ${fmtDuration(editing.endMin - editing.startMin)}（不可在此修改）`}
+          desc={`${itemMap.get(editing.itemId)?.title ?? '任务'} · 时长 ${fmtDuration(editing.endMin - editing.startMin)}`}
+          onClose={() => setEditingId(null)}
         >
           {editing.locked && (
             <p className="notice">🔒 已锁定：重排、重建都不会改动这个时间；解锁后才能调整。</p>
@@ -445,63 +465,23 @@ export function WeekPage({ state, actions }: { state: AppState; actions: Actions
             </Button>
           </div>
           {editError && <span className="warn">{editError}</span>}
-        </Panel>
+        </Modal>
       )}
 
-      <div className="split-2">
-        {packed.overflow.length > 0 ? (
-          <Panel title={`装不下的计划项（${packed.overflow.length}）`} desc="容量不足，剩余部分会留到下一周">
-            <ul className="item-list">
-              {packed.overflow.map((o) => (
-                <li key={o.item.id}>
-                  <strong title={o.item.title}>{o.item.title}</strong>
-                  <span className="muted">剩余 {fmtDuration(o.remainingMin ?? o.item.estimateMin)}</span>
-                  <Button variant="quiet" size="sm" onClick={() => void actions.removeItem(o.item.id)}>
-                    移除
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        ) : (
-          <Panel className="insight-card" title="排程说明">
-            <ul className="bullets">
-              {hasSaved ? (
-                <>
-                  <li>本周已生成 {saved.length} 个任务块，占用 {fmtDuration(plannedMin)}。</li>
-                  <li>已完成或已调整的块不会被「补排新任务」覆盖。</li>
-                </>
-              ) : (
-                packed.suggestions.map((s) => <li key={s}>{s}</li>)
-              )}
-              <li>超过单日容量的任务会自动拆分到多天，不丢工作量。</li>
-            </ul>
-          </Panel>
-        )}
-
-        <Panel title="本周节奏" desc="柱高 = 当天已排时长占可用时长">
-          <div className="stack-tight">
-            {dates.map((d) => {
-              const min = shown.filter((b) => b.date === d).reduce((s, b) => s + (b.endMin - b.startMin), 0);
-              const cap = Math.max(1, state.settings.weekdays[weekdayOf(d)] ?? 0);
-              return (
-                <div key={d} className="fc">
-                  <b>{WEEKDAY_LABEL[weekdayOf(d)]}</b>
-                  <div>
-                    <div className="fc-bar">
-                      <i style={{ width: `${Math.min(100, (min / cap) * 100)}%` }} />
-                    </div>
-                    <small>{min === 0 ? '留白' : `${(min / 60).toFixed(1)} / ${(cap / 60).toFixed(1)} 小时`}</small>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {packed.overflow.length > 0 && (
+        <Panel title={`装不下的计划项（${packed.overflow.length}）`} desc="容量不足，剩余部分留到下一周">
+          <ul className="item-list">
+            {packed.overflow.map((o) => (
+              <li key={o.item.id}>
+                <strong title={o.item.title}>{o.item.title}</strong>
+                <span className="muted">剩余 {fmtDuration(o.remainingMin ?? o.item.estimateMin)}</span>
+                <Button variant="quiet" size="sm" onClick={() => void actions.removeItem(o.item.id)}>
+                  移除
+                </Button>
+              </li>
+            ))}
+          </ul>
         </Panel>
-      </div>
-
-      {hasSaved && editing === null && (
-        <div className="center-note">点任务块上的「调整」可以改日期与开始时间，时长保持不变。</div>
       )}
     </div>
   );

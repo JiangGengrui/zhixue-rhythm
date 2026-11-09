@@ -1387,3 +1387,67 @@ input[type='time'] { font-family: var(--mono); font-size: 12.5px; }
   border: 1px solid var(--line); background: transparent; color: var(--ink);
   border-radius: 8px; padding: 6px 8px; font-size: 12px;
 }
+
+/* ── 弹窗 ── */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 90;
+  display: grid; place-items: center; padding: 20px;
+  background: rgba(3, 6, 11, 0.62);
+  animation: modal-fade var(--dur-fast) ease both;
+}
+[data-theme='light'] .modal-mask { background: rgba(15, 32, 40, 0.3); }
+
+.modal-sheet {
+  width: min(520px, 100%);
+  max-height: min(86vh, 780px);
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+  animation: modal-pop var(--dur) var(--ease) both;
+}
+[data-theme='light'] .modal-sheet {
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 32, 40, 0.2);
+}
+
+.modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+  padding: 20px 22px 10px;
+}
+.modal-head h2 { margin: 0; font-size: 17px; letter-spacing: 0.01em; }
+.modal-head p { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
+
+.modal-x {
+  flex: none; width: 30px; height: 30px; border-radius: 9px;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+  font-size: 17px; line-height: 1; cursor: pointer;
+  transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.modal-x:hover { color: var(--ink); border-color: var(--line-2); }
+
+.modal-body { padding: 4px 22px 22px; overflow-y: auto; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 22px 20px; border-top: 1px solid var(--line);
+}
+
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 列表限高，避免页面被长列表撑长 */
+.scroll-y { max-height: 340px; overflow-y: auto; }
+.item-add { display: grid; grid-template-columns: 1fr 120px 96px 84px auto; gap: 8px; align-items: end; }
+
+@media (max-width: 720px) {
+  .modal-mask { padding: 12px; align-items: flex-end; }
+  .modal-sheet { max-height: 88vh; }
+  .modal-head { padding: 16px 16px 8px; }
+  .modal-body { padding: 4px 16px 16px; }
+  .modal-foot { padding: 12px 16px 16px; }
+  .item-add { grid-template-columns: 1fr 1fr; }
+}

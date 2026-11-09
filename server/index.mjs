@@ -109,7 +109,13 @@ function sendJson(res, status, payload) {
 }
 
 async function serveStatic(pathname, res) {
-  const safe = normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, '');
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // 非法百分号编码按原文处理，避免整站 500
+  }
+  const safe = normalize(decoded).replace(/^(\.\.[/\\])+/, '');
   let filePath = join(DIST, safe === '/' ? 'index.html' : safe);
 
   try {
@@ -124,7 +130,11 @@ async function serveStatic(pathname, res) {
     const content = await readFile(filePath);
     res.writeHead(200, {
       'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream',
-      'Cache-Control': filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+      // 只有带 hash 的构建产物才能长缓存；入口 HTML 用短缓存，既不让发版更新滞后太久，
+      // 又能在断网时命中缓存完成离线冷启动
+      'Cache-Control': /[\\/]assets[\\/]/.test(filePath)
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=600',
     });
     res.end(content);
   } catch {

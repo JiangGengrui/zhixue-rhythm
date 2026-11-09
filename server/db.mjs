@@ -161,4 +161,15 @@ function migrate(db) {
 }
 
 export const nowISO = () => new Date().toISOString();
+/** 本地时区 ISO（带偏移）：其前 10 位与 todayISO() 一致，避免凌晨时段按 UTC 日期算成前一天 */
+export const nowLocalISO = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const abs = Math.abs(off);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+    d.getMinutes(),
+  )}:${pad(d.getSeconds())}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+};
 export const defaultWeekdays = DEFAULT_WEEKDAYS;

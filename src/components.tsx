@@ -203,6 +203,66 @@ export function Empty(props: { title: string; desc?: string; action?: ReactNode 
   );
 }
 
+/* ══ 弹窗 ══ */
+
+export function Modal(props: {
+  open: boolean;
+  title: string;
+  desc?: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  /** 内容较多时放宽 */
+  width?: number;
+}) {
+  const { open, onClose } = props;
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="modal-mask"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="modal-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={props.title}
+        style={props.width ? { width: `min(${props.width}px, 100%)` } : undefined}
+      >
+        <header className="modal-head">
+          <div>
+            <h2>{props.title}</h2>
+            {props.desc && <p>{props.desc}</p>}
+          </div>
+          <button type="button" className="modal-x" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </header>
+        <div className="modal-body">{props.children}</div>
+        {props.footer && <footer className="modal-foot">{props.footer}</footer>}
+      </div>
+    </div>
+  );
+}
+
 /* ══ 主题切换 ══ */
 
 export function ThemeToggle(props: { theme: 'dark' | 'light'; onToggle: () => void }) {

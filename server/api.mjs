@@ -2,7 +2,7 @@ import {
   allowLogin, createSession, destroySession, generateRecoveryCode, hashPassword, hashRecoveryCode,
   newId, sessionCookie, clearCookie, verifyPassword, verifyRecoveryCode,
 } from './auth.mjs';
-import { nowISO } from './db.mjs';
+import { nowISO, nowLocalISO } from './db.mjs';
 import { buildReport, decomposeGoal, evaluateAlerts, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -147,6 +147,8 @@ export function createApi(db) {
     markRead: db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?'),
     notifById: db.prepare('SELECT * FROM notifications WHERE id = ? AND user_id = ?'),
     deletePendingWeek: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date >= ? AND date <= ? AND status <> 'done' AND locked = 0"),
+    // 往周遗留的未完成块：重新规划时当作"顺延"，避免同一任务挂在过去又排进未来
+    deletePendingBefore: db.prepare("DELETE FROM blocks WHERE user_id = ? AND date < ? AND status IN ('pending','running') AND locked = 0"),
     setLocked: db.prepare('UPDATE blocks SET locked = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     clearItems: db.prepare('DELETE FROM items WHERE user_id = ?'),
     clearBlocks: db.prepare('DELETE FROM blocks WHERE user_id = ?'),
@@ -267,7 +269,7 @@ export function createApi(db) {
         });
         for (const a of alerts) {
           const exists = q.notifToday.get(user.id, a.kind, today).c;
-          if (!exists) q.insertNotif.run(user.id, a.kind, a.level, a.title, a.body, nowISO());
+          if (!exists) q.insertNotif.run(user.id, a.kind, a.level, a.title, a.body, nowLocalISO());
         }
       }
       const items = q.recentNotifs.all(user.id).map((row) => ({
@@ -418,6 +420,10 @@ export function createApi(db) {
         today: todayISO(),
         manual: true,
         replanCount,
+        // 已完成 / 锁定的块要保留，重排后的新块必须避开它们所在时段
+        busy: state.blocks
+          .filter((b) => b.date >= weekStart && b.date <= weekEnd && (b.locked || b.status === 'done'))
+          .map((b) => ({ date: b.date, startMin: b.startMin, endMin: b.endMin })),
       });
 
       if (plan.blocked) {
@@ -430,13 +436,27 @@ export function createApi(db) {
         throw new HttpError(409, 'E1034', '这个方案仍然装不下，建议改用「替代」或「放弃」，或延长目标日期');
       }
 
+      // 时间地点没变的块复用原 id：前端手上的 id 不会因为点一次「应用重排」就全部失效
+      const reusableIds = new Map();
+      for (const b of state.blocks) {
+        if (b.date < weekStart || b.date > weekEnd) continue;
+        if (b.locked || b.status === 'done' || b.status === 'skipped') continue;
+        reusableIds.set(`${b.itemId}|${b.date}|${b.startMin}`, b.id);
+      }
+      const takenIds = new Set();
+
       db.exec('BEGIN');
       try {
         q.deletePendingWeek.run(user.id, weekStart, weekEnd);
         // 锁定块未被 deletePendingWeek 删除，仍在表里；只写回方案生成的块
         for (const block of option.blocks) {
+          const slot = `${block.itemId}|${block.date}|${block.startMin}`;
+          const reused = reusableIds.get(slot);
+          // 复用的 id 必须唯一且不与保留块冲突，否则退回随机 id
+          const id = reused && !takenIds.has(reused) ? reused : newId('blk');
+          takenIds.add(id);
           q.insertBlock.run(
-            block.id, user.id, block.itemId, block.date, block.startMin, block.endMin,
+            id, user.id, block.itemId, block.date, block.startMin, block.endMin,
             block.isBuffer ? 1 : 0, 'pending', null, null, nowISO(),
           );
         }
@@ -533,7 +553,7 @@ export function createApi(db) {
     'GET /api/export': ({ user, query, res }) => {
       const format = String(query.get('format') ?? 'json').toLowerCase();
       const state = stateOf(user);
-      const stamp = new Date().toISOString().slice(0, 10);
+      const stamp = todayISO();
 
       if (format === 'csv') {
         const byId = new Map(state.items.map((i) => [i.id, i]));
@@ -599,7 +619,37 @@ export function createApi(db) {
         level,
         existing ? existing.created_at : nowISO(),
       );
-      return { goal: normalizeGoal(q.goalByUser.get(user.id)) };
+      // 目标页填的"每周可用"就是排程容量：同步到每日时段，避免两个口径互相打架
+      const planDays = user.settings.weekdays.map((v) => Math.max(0, v));
+      const totalPlanned = planDays.reduce((a, b) => a + b, 0);
+      let nextWeekdays = null;
+      if (totalPlanned === 0) {
+        // 平均分到 7 天，余数补到前几天的 1 分钟上，保证合计精确等于每周可用
+        const base = Math.floor(weeklyMinutes / 7);
+        const rest = weeklyMinutes - base * 7;
+        nextWeekdays = Array.from({ length: 7 }, (_, i) => base + (i < rest ? 1 : 0));
+      } else if (Math.abs(totalPlanned - weeklyMinutes) > weeklyMinutes * 0.1) {
+        // 按比例缩放，保留用户原本每天多寡的相对分布
+        const ratio = weeklyMinutes / totalPlanned;
+        nextWeekdays = planDays.map((v) => Math.min(1440, Math.round((v * ratio) / 5) * 5));
+        const diff = weeklyMinutes - nextWeekdays.reduce((a, b) => a + b, 0);
+        if (diff !== 0) {
+          let top = 0;
+          for (let i = 1; i < nextWeekdays.length; i++) {
+            if (nextWeekdays[i] > nextWeekdays[top]) top = i;
+          }
+          nextWeekdays[top] = Math.max(0, Math.min(1440, nextWeekdays[top] + diff));
+        }
+      }
+      if (nextWeekdays) {
+        q.updateSettings.run(user.settings.weekStart ?? 1, JSON.stringify(nextWeekdays), user.id);
+      }
+      return {
+        goal: normalizeGoal(q.goalByUser.get(user.id)),
+        settings: nextWeekdays
+          ? { weekStart: user.settings.weekStart ?? 1, weekdays: nextWeekdays }
+          : user.settings,
+      };
     },
 
     'POST /api/items': ({ user, body }) => {
@@ -644,25 +694,25 @@ export function createApi(db) {
       // rebuild：先清掉这一周未完成的块，再把剩余工作量重新装一遍（已完成的记录保留）
       if (mode === 'rebuild') {
         q.deletePendingWeek.run(user.id, weekStart, weekEnd);
+        // 更早几周遗留的未完成块顺延过来，否则这些任务会被 bookedElsewhere 全部排除、新周排不出东西
+        q.deletePendingBefore.run(user.id, weekStart);
       }
 
-      // fill：本周已有块原样保留（已完成记录不会被重排覆盖），只为没有块的任务补排
+      // 本周已有块原样保留：当作"已占用时段"精确避开，而不是简单扣当日容量（否则会重叠）
       const existingWeek = q.blocksByWeek.all(user.id, weekStart, weekEnd);
-      const existingItems = new Set(existingWeek.map((row) => row.item_id));
+      const busy = existingWeek
+        .filter((row) => row.status !== 'skipped')
+        .map((row) => ({ date: row.date, startMin: row.start_min, endMin: row.end_min }));
 
-      // 已有块占用的时间从当日容量中扣除
-      const usedByDate = new Map();
+      // 本周已排但未完成的时长要从未完成工时里扣掉，避免同一任务被重复规划
+      const scheduledByItem = new Map();
       for (const row of existingWeek) {
-        usedByDate.set(row.date, (usedByDate.get(row.date) ?? 0) + (row.end_min - row.start_min));
+        if (row.status === 'done' || row.status === 'skipped') continue;
+        scheduledByItem.set(
+          row.item_id,
+          (scheduledByItem.get(row.item_id) ?? 0) + (row.end_min - row.start_min),
+        );
       }
-      const weekdays = user.settings.weekdays.slice();
-      for (let i = 0; i < 7; i++) {
-        const date = addDays(weekStart, i);
-        const used = usedByDate.get(date) ?? 0;
-        const wd = new Date(`${date}T00:00:00`).getDay();
-        weekdays[wd] = Math.max(0, (weekdays[wd] ?? 0) - used);
-      }
-      const adjusted = { ...user.settings, weekdays };
 
       const bookedElsewhere = new Set(
         q.blockedElsewhere.all(user.id, weekStart, weekEnd).map((row) => row.item_id),
@@ -671,12 +721,18 @@ export function createApi(db) {
         .all(user.id)
         .map(normalizeItem)
         .filter((i) => i.goalId === goal.id)
-        .filter((i) => (i.remainingMin ?? i.estimateMin) > 0)
-        .filter((i) => !existingItems.has(i.id))
         .filter((i) => !bookedElsewhere.has(i.id))
-        .map((i) => ({ ...i, estimateMin: i.remainingMin ?? i.estimateMin }));
+        .map((i) => {
+          const left = (i.remainingMin ?? i.estimateMin) - (scheduledByItem.get(i.id) ?? 0);
+          return { ...i, estimateMin: Math.max(0, left) };
+        })
+        .filter((i) => i.estimateMin > 0);
 
-      const packed = packWeek(items, adjusted, weekStart, from);
+      // 块 id 由服务端随机生成：本周保留下来的已完成块不会再撞主键
+      const packed = packWeek(items, user.settings, weekStart, from, {
+        busy,
+        makeId: () => newId('blk'),
+      });
 
       if (packed.blocks.length > 0) {
         db.exec('BEGIN');
@@ -794,6 +850,9 @@ export function createApi(db) {
 
     const feedbackMatch = path.match(/^\/api\/feedback\/(\d+)$/);
     if (feedbackMatch) {
+      if (!['POST', 'PATCH', 'DELETE'].includes(method)) {
+        throw new HttpError(405, 'E1000', '方法不支持');
+      }
       const user = requireUser(ctx);
       if (!user.isAdmin) throw new HttpError(403, 'E2005', '仅管理员可以管理留言');
       const row = q.feedbackById.get(Number(feedbackMatch[1]));
@@ -814,7 +873,16 @@ export function createApi(db) {
         return { ok: true };
       }
       if (method !== 'PATCH') throw new HttpError(405, 'E1000', '方法不支持');
-      return patchBlock(user, blockMatch[1], ctx.body);
+      // opId 在成功之后才记账：失败的请求不会烧掉 opId，离线重试才能真正补上
+      const id = blockMatch[1];
+      const opId = typeof ctx.body?.opId === 'string' ? ctx.body.opId.slice(0, 64) : '';
+      if (opId && q.opExists.get(user.id, opId)) {
+        const existing = q.blockById.get(id, user.id);
+        if (existing) return { block: normalizeBlock(existing), idempotent: true };
+      }
+      const result = patchBlock(user, id, ctx.body);
+      if (opId) q.insertOp.run(user.id, opId, nowISO());
+      return result;
     }
 
     const key = `${method} ${path}`;
@@ -850,7 +918,7 @@ export function createApi(db) {
       const end = start + duration;
       if (end > 1440) throw bad('E1027', '结束时间不能超过 24:00');
 
-      const weekStart = startOfWeekISO(block.date);
+      const weekStart = startOfWeekISO(block.date, user.settings.weekStart ?? 1);
       const weekEnd = addDays(weekStart, 6);
       if (date < weekStart || date > weekEnd) throw bad('E1028', '只能在同一个周内移动任务');
 
@@ -863,12 +931,6 @@ export function createApi(db) {
 
       q.moveBlock.run(date, start, end, nowISO(), id, user.id);
       return { block: normalizeBlock(q.blockById.get(id, user.id)) };
-    }
-
-    const opId = typeof body.opId === 'string' ? body.opId.slice(0, 64) : '';
-    if (opId) {
-      if (q.opExists.get(user.id, opId)) return { block: normalizeBlock(block), idempotent: true };
-      q.insertOp.run(user.id, opId, nowISO());
     }
 
     const source = body.source === 'backfill' ? 'backfill' : body.source === 'plan' ? 'plan' : block.source ?? 'plan';
@@ -942,9 +1004,10 @@ function elapsedSec(iso) {
   return Math.max(0, Math.round((Date.now() - t) / 1000));
 }
 
-function startOfWeekISO(iso) {
+function startOfWeekISO(iso, weekStartDay = 1) {
   const d = new Date(`${iso}T00:00:00`);
-  const offset = (d.getDay() + 6) % 7; // 周一为一周起点
+  // 跟随用户在设置里选择的一周起点（0=周日，1=周一）
+  const offset = (d.getDay() - (weekStartDay % 7) + 7) % 7;
   return addDays(iso, -offset);
 }
 

@@ -258,7 +258,7 @@ export function useAppState() {
     ) => {
       const before = state.blocks.find((b) => b.id === id);
       const patch: StatusPatch = { status, actualMin, skipReason, ...extra };
-      // 先乐观更新，离线时界面也能立即反映
+      // 先乐观更新，离线时界面也能立即反映（含计时起点，保证离线也能开始/暂停）
       setState((prev) => ({
         ...prev,
         blocks: prev.blocks.map((b) =>
@@ -266,6 +266,12 @@ export function useAppState() {
             ? {
                 ...b,
                 status,
+                startedAt:
+                  status === 'running'
+                    ? new Date().toISOString()
+                    : status === 'pending'
+                      ? undefined
+                      : b.startedAt,
                 actualMin: status === 'done' ? actualMin ?? b.endMin - b.startMin : b.actualMin,
                 skipReason: status === 'skipped' ? skipReason ?? 'other' : undefined,
                 progressPct: status === 'done' ? extra?.progressPct ?? b.progressPct ?? 100 : b.progressPct,

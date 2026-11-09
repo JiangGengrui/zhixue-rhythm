@@ -93,7 +93,7 @@ describe('planReplan · 重排方案', () => {
     expect(defer.feasible).toBe(true);
   });
 
-  it('负载增幅超过 20% 时标记为不可行（硬约束）', () => {
+  it('负载增幅超过 20% 时只有顺延仍可行（顺延本就允许装不下）', () => {
     const heavy = [item('a', 900, 5), item('b', 900, 5)];
     const current: Block[] = [
       { id: 'p1', itemId: 'a', date: '2026-11-10', startMin: 1140, endMin: 1200, isBuffer: false, status: 'pending' },
@@ -101,7 +101,9 @@ describe('planReplan · 重排方案', () => {
     const result = planReplan({ blocks: current, items: heavy, settings, weekStart, today });
     const defer = result.options.find((o) => o.key === 'defer')!;
     expect(defer.loadIncreasePct).toBeGreaterThan(20);
-    expect(defer.feasible).toBe(false);
+    // 顺延的语义就是"装不下的留到下周"，不应被负载增幅挡掉
+    expect(defer.feasible).toBe(true);
+    expect(defer.summary.deferredMin).toBeGreaterThan(0);
   });
 
   it('没有可压缩/可替换的对象时标记为不适用', () => {

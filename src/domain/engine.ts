@@ -20,6 +20,26 @@ export const DAY_START_MIN = 19 * 60;
 
 const round = (n: number) => Math.round(n);
 
+/** 单任务单日上限：避免一个大任务吃满整天 */
+export const MAX_ITEM_MIN_PER_DAY = 120;
+/** 每天推进的任务数上限：太多会切碎，太少又会让部分任务饿死 */
+export const MAX_ITEMS_PER_DAY = 3;
+/** 单块最短时长：避免把任务切得过碎 */
+export const MIN_CHUNK_MIN = 30;
+/** 一天的最晚结束时间，排程不会越过 24:00 */
+export const DAY_END_MIN = 24 * 60;
+
+export interface PackOptions {
+  /** 每天已被占用的时段；传入后新块会精确避开，而不是只扣容量 */
+  busy?: Array<{ date: string; startMin: number; endMin: number }>;
+  /** 生成块 id；默认确定性 id，服务端应传入随机 id 避免与保留块主键冲突 */
+  makeId?: (date: string, itemId: string, seq: number) => string;
+  maxItemMinPerDay?: number;
+  minChunkMin?: number;
+  /** 每天最多推进几个任务 */
+  maxItemsPerDay?: number;
+}
+
 export function demandMinutes(items: PlanItem[], level: Goal['level']): number {
   const coef = LEVEL_COEF[level];
   return round(items.reduce((sum, it) => sum + Math.max(0, it.estimateMin) * coef, 0));
@@ -62,64 +82,126 @@ export function packWeek(
   weekStartISO: string,
   /** 只从这一天（含）之后排程；用于周中生成时避免排到已过去的日期 */
   fromISO: string = weekStartISO,
+  options: PackOptions = {},
 ): PackedWeek {
   const dates = weekDates(weekStartISO);
+  const makeId =
+    options.makeId ??
+    ((date: string, itemId: string, seq: number) => `blk_${date}_${itemId}_${seq}`);
+  const minChunk = Math.max(15, options.minChunkMin ?? MIN_CHUNK_MIN);
+  const maxItemMin = Math.max(minChunk, options.maxItemMinPerDay ?? MAX_ITEM_MIN_PER_DAY);
+  const maxItemsPerDay = Math.max(1, options.maxItemsPerDay ?? MAX_ITEMS_PER_DAY);
+
   // 早于 fromISO 的日期不参与排程（容量记为 0）
   const dayCap = dates.map((d) =>
-    d < fromISO ? 0 : Math.max(0, settings.weekdays[weekdayOf(d)] ?? 0),
+    d < fromISO ? 0 : Math.max(0, Math.min(DAY_END_MIN, settings.weekdays[weekdayOf(d)] ?? 0)),
   );
-  const totalCap = dayCap.reduce((a, b) => a + b, 0);
-  const bufferTotal = round(totalCap * BUFFER_RATIO);
-  const normalCap = totalCap - bufferTotal;
+  // 每天的开始时间：默认 19:00，当天时长较大时自动提前，保证不越过 24:00
+  const dayStart = dates.map((_, i) => Math.max(0, Math.min(DAY_START_MIN, DAY_END_MIN - dayCap[i]!)));
 
-  const normalLeft = dayCap.slice();
-  const bufferLeft = dayCap.slice();
-  const cursor = dates.map(() => DAY_START_MIN);
+  // 既有占用：按时间段避开，而不是仅扣容量（否则新块会和已有块重叠）
+  const busy = dates.map(() => [] as Array<[number, number]>);
+  for (const b of options.busy ?? []) {
+    const idx = dates.indexOf(b.date);
+    if (idx === -1) continue;
+    const start = Math.max(DAY_START_MIN, Math.min(DAY_END_MIN, b.startMin));
+    const end = Math.max(start, Math.min(DAY_END_MIN, b.endMin));
+    if (end > start) busy[idx]!.push([start, end]);
+  }
+  busy.forEach((list) => list.sort((a, b) => a[0] - b[0]));
+
+  const freeByDay = dates.map((_, i) => {
+    const occupied = busy[i]!.reduce((sum, [s, e]) => sum + (e - s), 0);
+    return Math.max(0, dayCap[i]! - occupied);
+  });
+  const totalCap = dayCap.reduce((a, b) => a + b, 0);
+  const freeTotal = freeByDay.reduce((a, b) => a + b, 0);
+  const bufferTotal = round(freeTotal * BUFFER_RATIO);
+  const normalCap = freeTotal - bufferTotal;
+
+  const normalLeft = freeByDay.slice();
+  const dayUsed = dates.map(() => 0);
+  const cursor = busy.map((list, i) => nextFreeStart(list, dayStart[i]!));
+  const perDay = dates.map(() => new Map<string, { min: number; seq: number }>());
   const blocks: Block[] = [];
   const overflow: PackedWeek['overflow'] = [];
 
   let usedNormal = 0;
   let usedBuffer = 0;
 
-  for (const item of orderItems(items)) {
-    let remaining = Math.max(0, item.estimateMin);
-    if (remaining === 0) continue;
-    let seq = 0;
+  const ordered = orderItems(items).filter((it) => Math.max(0, it.estimateMin) > 0);
+  const remaining = new Map(ordered.map((it) => [it.id, Math.max(0, it.estimateMin)]));
 
-    // 1) 优先用常规容量；超过单日容量时自动拆分到多天
-    for (let i = 0; i < dates.length && remaining > 0; i++) {
-      const avail = Math.min(normalLeft[i]!, normalCap - usedNormal);
-      if (avail <= 0) continue;
-      const take = Math.min(remaining, avail);
-      blocks.push(makeBlock(item, dates[i]!, cursor[i]!, take, false, seq++));
-      cursor[i] = cursor[i]! + take;
-      normalLeft[i] = normalLeft[i]! - take;
-      usedNormal += take;
-      remaining -= take;
-    }
+  for (let day = 0; day < dates.length; day++) {
+    let active = ordered.filter((it) => (remaining.get(it.id) ?? 0) > 0);
+    if (active.length === 0) break;
+    // 轮转起点：每天由不同任务先取时间，避免固定顺序的任务吃满整周
+    const rot = day % active.length;
+    active = [...active.slice(rot), ...active.slice(0, rot)];
 
-    // 2) 弹性位只在"整块剩余量能放下"时使用，避免同一任务被切得过碎
-    if (remaining > 0) {
-      for (let i = 0; i < dates.length; i++) {
-        const avail = Math.min(bufferLeft[i]!, bufferTotal - usedBuffer);
-        if (avail < remaining) continue;
-        blocks.push(makeBlock(item, dates[i]!, cursor[i]!, remaining, true, seq++));
-        cursor[i] = cursor[i]! + remaining;
-        bufferLeft[i] = bufferLeft[i]! - remaining;
-        usedBuffer += remaining;
-        remaining = 0;
-        break;
+    for (let guard = 0; guard < 64; guard++) {
+      const pending = active.filter((it) => (remaining.get(it.id) ?? 0) > 0);
+      const freeNow = freeByDay[day]! - dayUsed[day]!;
+      if (pending.length === 0 || freeNow <= 0) break;
+      // 当天只推进排在最前的若干任务，份额均分：既不把任务切碎，也不让单个任务独占
+      const groupSize = Math.min(pending.length, maxItemsPerDay);
+      const share = Math.min(maxItemMin, Math.max(minChunk, Math.floor(freeNow / groupSize)));
+      let placed = false;
+
+      for (const item of pending) {
+        const free = freeByDay[day]! - dayUsed[day]!;
+        if (free <= 0) break;
+        const left = remaining.get(item.id) ?? 0;
+        if (left <= 0) continue;
+        const rec = perDay[day]!.get(item.id);
+        const itemRoom = Math.max(0, maxItemMin - (rec?.min ?? 0));
+        const start = cursor[day]!;
+        const limit = segmentEnd(busy[day]!, start);
+        if (limit - start < minChunk) {
+          cursor[day] = nextFreeStart(busy[day]!, limit);
+          continue;
+        }
+        let take = Math.min(left, share, itemRoom, free, limit - start);
+        // 剩余量本就小于一个最小块时允许放完，否则不切碎
+        if (take < minChunk && take < left) continue;
+
+        const regRoom = Math.max(0, Math.min(normalLeft[day]!, normalCap - usedNormal));
+        let reg = Math.min(take, regRoom);
+        let buf = Math.min(take - reg, Math.max(0, bufferTotal - usedBuffer));
+        // 常规位只剩零头时并到弹性位，避免同一任务被切成两小段
+        if (reg > 0 && reg < minChunk && reg + buf <= Math.max(0, bufferTotal - usedBuffer)) {
+          buf += reg;
+          reg = 0;
+        }
+        take = reg + buf;
+        if (take <= 0 || (take < minChunk && take < left)) continue;
+
+        // 常规位与弹性位首尾相接，合并成一个块，避免同一任务被切成碎片
+        const duration = reg + buf;
+        const seq = rec?.seq ?? 0;
+        blocks.push(makeBlock(item, dates[day]!, start, duration, reg === 0, seq, makeId));
+        cursor[day] = start + duration;
+        normalLeft[day] = normalLeft[day]! - reg;
+        usedNormal += reg;
+        usedBuffer += buf;
+        dayUsed[day] = dayUsed[day]! + take;
+        remaining.set(item.id, left - take);
+        perDay[day]!.set(item.id, { min: (rec?.min ?? 0) + take, seq });
+        placed = true;
       }
-    }
 
-    // 3) 仍有剩余：记为溢出，剩余量会留到下一周
-    if (remaining > 0) {
-      overflow.push({
-        item,
-        remainingMin: remaining,
-        reason: usedNormal + usedBuffer >= totalCap ? 'no-capacity' : 'buffer-used',
-      });
+      if (!placed) break;
     }
+  }
+
+  for (const item of ordered) {
+    const left = remaining.get(item.id) ?? 0;
+    if (left <= 0) continue;
+    overflow.push({
+      item,
+      remainingMin: left,
+      reason: usedNormal + usedBuffer >= freeTotal ? 'no-capacity' : 'buffer-used',
+    });
   }
 
   blocks.sort((a, b) => (a.date === b.date ? a.startMin - b.startMin : a.date < b.date ? -1 : 1));
@@ -162,10 +244,11 @@ function makeBlock(
   duration: number,
   isBuffer: boolean,
   seq = 0,
+  makeId: (date: string, itemId: string, seq: number) => string = (d, id, s) => `blk_${d}_${id}_${s}`,
 ): Block {
   return {
-    // 序号用于区分同一任务在同一天的多个分片（常规位 + 弹性位），保证 id 唯一
-    id: `blk_${date}_${item.id}_${seq}`,
+    // 序号用于区分同一任务在同一天的多个分片（常规位 + 弹性位）
+    id: makeId(date, item.id, seq),
     itemId: item.id,
     date,
     startMin,
@@ -173,6 +256,25 @@ function makeBlock(
     isBuffer,
     status: 'pending',
   };
+}
+
+/** 从 start 开始的下一个空闲起点（跳过既有占用） */
+function nextFreeStart(list: Array<[number, number]>, start: number): number {
+  let pos = Math.max(0, start);
+  for (const [s, e] of list) {
+    if (pos >= e) continue;
+    if (pos < s) break;
+    pos = e;
+  }
+  return pos;
+}
+
+/** 从 start 开始这一段连续空闲的结束点（不超过 24:00） */
+function segmentEnd(list: Array<[number, number]>, start: number): number {
+  for (const [s] of list) {
+    if (s > start) return Math.min(DAY_END_MIN, s);
+  }
+  return DAY_END_MIN;
 }
 
 function p90(values: number[]): number {

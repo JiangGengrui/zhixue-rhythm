@@ -250,10 +250,12 @@ test('设置接口：校验每日时长并影响周容量', async () => {
 
   await call('PUT', '/api/goal', { title: 'g', deadline: '2026-12-19', weeklyMinutes: 600, level: 'once' }, cookie);
   await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 60, weight: 3 }, cookie);
+  // 目标页的「每周可用」是容量单一事实源：填 600 会把每日分布按比例缩放（保留原来的 0 天）
+  const afterGoal = await call('GET', '/api/state', null, cookie);
+  assert.deepEqual(afterGoal.json.settings.weekdays, [120, 120, 120, 120, 120, 0, 0]);
   const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-02' }, cookie);
   assert.equal(gen.status, 200);
-  // 新容量：周一至周五各 60 → 300
-  assert.equal(gen.json.capacityMin, 300);
+  assert.equal(gen.json.capacityMin, 600);
 });
 
 test('执行计时：开始、暂停、继续与计时推导用时', async () => {
@@ -391,10 +393,11 @@ test('任务锁定：锁定块在重建与重排中保留，且禁止移动', as
   assert.ok(keptLock2, '重排后锁定块应保留');
   assert.equal(keptLock2.startMin, first.startMin);
 
-  // 解锁后可以移动
-  await call('PATCH', `/api/blocks/${second.id}`, { locked: false }, cookie);
-  const unlockedMove = await call('PATCH', `/api/blocks/${second.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
-  assert.equal(unlockedMove.status, 200);
+  // 未锁定的块可以移动（重排会重新分配时间，id 可能已更新，取重排结果里的未锁定块）
+  const target = applied.json.blocks.find((b) => !b.locked && b.id !== first.id);
+  assert.ok(target, '重排后应仍有未锁定块');
+  const unlockedMove = await call('PATCH', `/api/blocks/${target.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
+  assert.equal(unlockedMove.status, 200, JSON.stringify(unlockedMove.json));
 });
 
 test('拆解草案可编辑：apply 时以提交的 items 为准', async () => {
@@ -556,11 +559,12 @@ test('移动任务块：同周改时间、拒绝重叠与跨周', async () => {
   // 120 + 120 分钟在每日 150 分钟容量下会被拆成 3 块
   assert.ok(gen.json.blocks.length >= 2, '应至少生成两块');
 
+  const duration = first.endMin - first.startMin;
   const moved = await call('PATCH', `/api/blocks/${first.id}`, { date: '2026-11-03', startMin: 600 }, cookie);
   assert.equal(moved.status, 200);
   assert.equal(moved.json.block.date, '2026-11-03');
   assert.equal(moved.json.block.startMin, 600);
-  assert.equal(moved.json.block.endMin, 720); // 时长不变
+  assert.equal(moved.json.block.endMin, 600 + duration); // 时长不变
 
   const overlap = await call('PATCH', `/api/blocks/${first.id}`, { date: second.date, startMin: second.startMin }, cookie);
   assert.equal(overlap.status, 400);

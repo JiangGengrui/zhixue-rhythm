@@ -43,7 +43,13 @@ export function parseCookies(header) {
   for (const part of String(header).split(';')) {
     const idx = part.indexOf('=');
     if (idx === -1) continue;
-    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    const raw = part.slice(idx + 1).trim();
+    // 畸形 cookie（如 %E0%A4%A）不能让整个请求 500，解析失败就按原文使用
+    try {
+      out[part.slice(0, idx).trim()] = decodeURIComponent(raw);
+    } catch {
+      out[part.slice(0, idx).trim()] = raw;
+    }
   }
   return out;
 }
@@ -107,6 +113,12 @@ export function allowLogin(ip, scope = 'login') {
   }
   fresh.push(now);
   attempts.set(key, fresh);
+  // 兜底清理：避免 Map 随 IP 数量无限增长
+  if (attempts.size > 5000) {
+    for (const [k, v] of attempts) {
+      if (v.every((t) => now - t >= 60000)) attempts.delete(k);
+    }
+  }
   return true;
 }
 

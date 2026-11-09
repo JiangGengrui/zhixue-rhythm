@@ -110,6 +110,8 @@ export function planReplan(input: {
   deviationMedian?: number;
   manual?: boolean;
   replanCount?: number;
+  /** 本周要保留的占用（已完成 / 锁定的块），重排时精确避开 */
+  busy?: Array<{ date: string; startMin: number; endMin: number }>;
 }): ReplanResult {
   const { blocks, items, settings, weekStart, today } = input;
   const from = today >= weekStart ? today : weekStart;
@@ -210,7 +212,7 @@ export function planReplan(input: {
   });
 
   const options: ReplanOption[] = specs.map((spec) => {
-    const packed = packWeek(spec.items, settings, weekStart, from);
+    const packed = packWeek(spec.items, settings, weekStart, from, { busy: input.busy ?? [] });
     const deferredMin = packed.overflow.reduce(
       (s, o) => s + (o.remainingMin ?? o.item.estimateMin),
       0,
@@ -237,10 +239,12 @@ export function planReplan(input: {
       // 顺延的语义就是"装不下的留到下周"，因此延期量不影响它的可行性；
       // 压缩/替代/放弃则要求本周能完全装下。
       applicable: spec.applicable,
+      // 顺延本身就是"把装不下的留到下周"，所以不受负载增幅约束
       feasible:
         spec.applicable &&
-        loadIncreasePct <= MAX_LOAD_INCREASE_PCT &&
-        (spec.key === 'defer' || deferredMin === 0),
+        (spec.key === 'defer'
+          ? true
+          : loadIncreasePct <= MAX_LOAD_INCREASE_PCT && deferredMin === 0),
       blocks: packed.blocks,
       itemChanges: spec.itemChanges,
     };

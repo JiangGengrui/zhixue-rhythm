@@ -239,12 +239,25 @@ async function main() {
   await cdp.click('设置目标');
   await sleep(700);
   body = await cdp.text();
-  assert(body.includes('每周可用') || body.includes('目标名称'), '「设置目标」未跳转到目标页');
+  assert(body.includes('载入示例数据') || body.includes('还没有目标'), '「设置目标」未跳转到目标页');
+
+  // 目标页右上角「设置目标」→ 弹窗内修改，不再把表单铺满页面
+  const goalBtn = await cdp.eval(`
+    const target = [...document.querySelectorAll('.page-head .head-actions button')].find((b) => b.textContent.includes('设置目标'));
+    if (target) target.click();
+    return !!target;
+  `);
+  assert(goalBtn, '目标页缺少右上角「设置目标」按钮');
+  await sleep(600);
+  body = await cdp.text();
+  assert(body.includes('目标名称') && body.includes('每周可用（小时）'), '「设置目标」弹窗未出现');
   await cdp.shot('02b-set-goal');
-  console.log('✓ 顶栏「设置目标」每页可见且可用');
+  await cdp.click('取消');
+  await sleep(400);
+  console.log('✓ 顶栏「设置目标」每页可见且可用，目标设置改为弹窗');
 
   // 3. 载入示例数据 → 目标页显示真实 R 值
-  await cdp.click('载入示例数据');
+  await cdp.click('载入示例');
   await sleep(1200);
   body = await cdp.text();
   assert(body.includes('可行性 R'), '目标页缺少可行性 R 值');
@@ -254,7 +267,14 @@ async function main() {
 
 
 
-  // 3b. 智能拆解：生成草案 → 阶段与裁断结果可见（不采纳，避免覆盖示例数据）
+  // 3b. 智能拆解：弹窗内生成草案 → 阶段与裁断结果可见（不采纳，避免覆盖示例数据）
+  const decomposeBtn = await cdp.eval(`
+    const target = [...document.querySelectorAll('.page-head .head-actions button')].find((b) => b.textContent.includes('智能拆解'));
+    if (target) target.click();
+    return !!target;
+  `);
+  assert(decomposeBtn, '目标页缺少「智能拆解」按钮');
+  await sleep(600);
   await cdp.click('生成草案');
   await sleep(1500);
   body = await cdp.text();
@@ -266,6 +286,8 @@ async function main() {
   `);
   assert(trimInfo.hasVerdict, '拆解草案缺少 R 值');
   await cdp.shot('03b-decompose');
+  await cdp.click('关闭');
+  await sleep(400);
   console.log('✓ 智能拆解草案生成正常');
 
   // 4. 周视图 → 生成本周计划
@@ -306,16 +328,17 @@ async function main() {
   await cdp.shot('04-week');
   console.log('✓ 周计划已生成并落库');
 
-  // 4b. 重排建议：评估 → 四个方案可见（含不适用/超载标记）
-  await cdp.click('评估是否需要重排');
-  await sleep(1500);
+  // 4b. 重排建议：弹窗内评估 → 四个方案可见（含不适用/超载标记）
+  await cdp.click('重排建议');
+  await sleep(1600);
   body = await cdp.text();
-  assert(body.includes('顺延') && body.includes('压缩') && body.includes('替代'), '重排方案未渲染');
+  assert(body.includes('顺延') && body.includes('压缩') && body.includes('替换'), '重排方案未渲染');
   const optCount = await cdp.eval(`return document.querySelectorAll('.opt-card').length;`);
   assert(optCount === 4, `重排方案应有 4 个，实际 ${optCount}`);
   await cdp.shot('04b-replan');
   console.log('✓ 重排方案评估正常');
-  // 关掉方案面板，避免影响后续步骤的按钮查找
+  // 关掉方案弹窗，避免影响后续步骤的按钮查找
+  await cdp.click('关闭');
   await cdp.eval(`window.scrollTo(0, 0); return true;`);
 
   // 4b. 调整任务时间（同周内移动）
@@ -368,12 +391,37 @@ async function main() {
   assert(!body.includes('NaN'), '周报出现 NaN');
   await cdp.shot('06-report');
   console.log('✓ 周报按真实记录计算');
-  // 3a. 通知中心：预警落库 → 铃铛未读 → 打开面板 → 全部已读
+  // 3a. 通知中心：临时把截止日拉近制造截止风险 → 铃铛未读 → 面板 → 全部已读 → 还原目标
+  const goalSnap = await cdp.eval(`
+    const st = await (await fetch('/api/state')).json();
+    return st.goal
+      ? { title: st.goal.title, deadline: st.goal.deadline, weeklyMinutes: st.goal.weeklyMinutes, level: st.goal.level }
+      : null;
+  `);
+  assert(goalSnap, '缺少目标，无法测试通知中心');
+  await cdp.eval(`
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date(); d.setDate(d.getDate() + 2);
+    const iso = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    await fetch('/api/goal', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: ${JSON.stringify(goalSnap.title)}, deadline: iso, weeklyMinutes: ${goalSnap.weeklyMinutes}, level: ${JSON.stringify(goalSnap.level)} }),
+    });
+    return iso;
+  `);
   await cdp.eval(`return document.querySelector('[aria-label="通知中心"]')?.click(); true;`);
-  await sleep(1200);
+  await sleep(1400);
   body = await cdp.text();
   assert(body.includes('通知中心'), '通知面板未打开');
-  assert(body.includes('紧急') || body.includes('提醒'), '面板内没有预警内容');
+  const notifDiag = await cdp.eval(`
+    return {
+      count: document.querySelectorAll('.notif-item').length,
+      levels: [...document.querySelectorAll('.notif-level')].map((el) => el.textContent.trim()),
+    };
+  `);
+  assert(notifDiag.count > 0, '通知面板没有任何通知');
+  assert(notifDiag.levels.includes('紧急') || notifDiag.levels.includes('提醒'), '通知缺少预警级别');
   const unreadBefore = await cdp.eval(`return document.querySelector('.notif-dot')?.textContent ?? '0';`);
   await cdp.click('全部已读');
   await sleep(800);
@@ -383,6 +431,16 @@ async function main() {
   await cdp.eval(`return document.querySelector('[aria-label="通知中心"]')?.click(); true;`);
   await sleep(500);
   await cdp.shot('03c-notifications');
+  await cdp.eval(`
+    await fetch('/api/goal', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: ${JSON.stringify(goalSnap.title)}, deadline: ${JSON.stringify(goalSnap.deadline)}, weeklyMinutes: ${goalSnap.weeklyMinutes}, level: ${JSON.stringify(goalSnap.level)} }),
+    });
+    return true;
+  `);
+  await cdp.send('Page.reload');
+  await sleep(1800);
   console.log('✓ 通知中心：预警生成与已读闭环正常');
 
   // 6b. 离线打卡：断网仍可操作，恢复网络后补传
