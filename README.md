@@ -4,9 +4,9 @@
 
 **把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-[在线体验](https://study-rhythm-58065.app.workbuddy.host/?sharecode=D3MS37FLYJ) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
+[在线体验](http://1d314887ba7340659327017e280bfae4.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.2.1-2be6ae)
+![version](https://img.shields.io/badge/version-1.3.1-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
@@ -167,7 +167,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 
 ## 版本
 
-当前 **v1.2.1**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
+当前 **v1.3.2**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
 
 | 版本 | 主题 |
 |---|---|
@@ -182,12 +182,15 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | v1.1.0 | 界面改版（深空/冷光双主题）+ 拆解与重排引擎 |
 | v1.2.0 | 拆解与重排接入界面 |
 | v1.2.1 | 主页卡缘闪烁与换词动画修复 |
+| v1.3.0 | 执行计时/部分完成、预警与通知中心、块锁定与草案编辑、离线冷启动、留言管理与隐私页 |
+| v1.3.1 | 排程算法重写（按天轮转均分）与计划控制修复（补排避让、重排落库、24:00 夹逼、容量单源） |
+| v1.3.2 | 界面精简（设置表单弹窗化、删除原理说明卡片）与计划链修复（通知去重时区、完成表单、离线计时、跨周生成、入口缓存） |
 
 ## 已知限制
 
 1. **忘记密码依赖恢复码**：没有邮件通道，恢复码丢失则无法自助找回。
 2. **多端并发以服务端为准**：后写覆盖，未做字段级冲突合并；离线队列只保证单设备按序补传。
-3. **重排是保守策略**：剩余工时远大于本周容量时，四个方案都会被判「超载」并禁用，此时应调整目标而不是继续排。
+3. **重排只作用于本周已排任务**：「顺延」恒可用（把本周装不下的推到下周），「压缩 / 替代 / 放弃」仍受未来 7 天负载增幅约束，增幅过大时置灰，此时应调整目标而不是继续排。
 4. **后端为 Node + SQLite**：适合单机演示与课程交付，生产部署需换 Postgres 并做连接池与迁移管理。
 
 ## 文档

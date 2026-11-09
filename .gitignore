@@ -3,8 +3,16 @@ dist/
 .vite/
 *.local
 .DS_Store
+Thumbs.db
 npm-debug.log*
+*.log
+*.err
+.env
+.env.*
 /data/
 artifacts/
-server/engine.generated.mjs
 backups/
+server/engine.generated.mjs
+*.db
+*.db-wal
+*.db-shm
