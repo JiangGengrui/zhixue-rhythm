@@ -6,11 +6,11 @@
 
 [在线体验](https://zhixue-rhythm-343909-9-1412780291.sh.run.tcloudbase.com/) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.3.2-2be6ae)
+![version](https://img.shields.io/badge/version-1.4.0-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
-![tests](https://img.shields.io/badge/tests-95%20passed-2be6ae)
+![tests](https://img.shields.io/badge/tests-187%20passed-2be6ae)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
