@@ -3,7 +3,6 @@ import type { ErrorInfo, ReactNode } from 'react';
 import {
   Button,
   IconGoal,
-  IconLogout,
   IconReport,
   IconSettings,
   IconToday,
@@ -17,7 +16,6 @@ import { TodayPage } from './pages/TodayPage';
 import { WeekPage } from './pages/WeekPage';
 import { ReportPage } from './pages/ReportPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { AuthPage } from './pages/AuthPage';
 import { AssistantPanel } from './assistant/AssistantPanel';
 import { startOfWeek, todayISO, weekDates, weekdayOf } from './domain/date';
 
@@ -170,38 +168,8 @@ function NotificationBell({
   );
 }
 
-function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="请保存恢复码">
-      <div className="modal-card">
-        <strong style={{ fontSize: 16 }}>请保存你的恢复码</strong>
-        <p>忘记密码时只能用它重置，关闭后不再显示。</p>
-        <code className="recovery-code">{code}</code>
-        <div className="row">
-          <Button
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(code);
-                setCopied(true);
-              } catch {
-                setCopied(false);
-              }
-            }}
-          >
-            {copied ? '已复制' : '复制恢复码'}
-          </Button>
-          <Button variant="primary" onClick={onClose}>
-            我已保存
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
-  const { phase, error, state, actions, recoveryCode, pendingOps, notifs, offlineSince } = useAppState();
+  const { phase, error, state, actions, pendingOps, notifs, offlineSince } = useAppState();
 
   // 通知轮询：登录态下每 60 秒刷新一次预警
   useEffect(() => {
@@ -272,8 +240,16 @@ export default function App() {
     );
   }
 
+  // 提交版是免登录演示：正常不会走到 guest；真走到这里说明服务端没开演示模式
   if (phase === 'guest') {
-    return <AuthPage actions={actions} error={error} theme={theme} onToggleTheme={toggle} />;
+    return (
+      <div className="boot">
+        <p>演示模式未启用，请用 start.cmd 启动服务后重试。</p>
+        <Button variant="primary" onClick={() => void actions.refresh()}>
+          重试
+        </Button>
+      </div>
+    );
   }
 
   if (phase === 'error') {
@@ -380,15 +356,6 @@ export default function App() {
                 <span>本周 {weekBlocks.length} 项</span>
               </div>
             </button>
-            <button
-              type="button"
-              className="btn btn-icon btn-quiet"
-              onClick={() => void actions.logout()}
-              aria-label="退出登录"
-              title="退出登录"
-            >
-              <IconLogout />
-            </button>
           </div>
         </div>
       </aside>
@@ -474,9 +441,7 @@ export default function App() {
         })}
       </nav>
 
-      {recoveryCode && <RecoveryNotice code={recoveryCode} onClose={actions.dismissRecovery} />}
-
-      {/* 助手只在登录后出现；离线时入口禁用，避免点了必然失败的请求 */}
+      {/* 离线时入口禁用，避免点了必然失败的请求 */}
       {(phase === 'ready' || phase === 'offline') && (
         <AssistantPanel
           offline={phase === 'offline'}

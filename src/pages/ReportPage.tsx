@@ -196,7 +196,7 @@ export function ReportPage({ state }: { state: AppState }) {
                   <div className="t-main">
                     <div className="t-title">{itemTitle(b.itemId)}</div>
                   </div>
-                  <span className="mono muted" style={{ fontSize: 11.5 }}>
+                  <span className="mono muted" style={{ fontSize: 12 }}>
                     {b.status === 'done'
                       ? fmtDuration(b.actualMin ?? b.endMin - b.startMin)
                       : `${fmtDuration(b.endMin - b.startMin)} 计划`}

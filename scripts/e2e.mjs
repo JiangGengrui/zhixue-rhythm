@@ -147,7 +147,7 @@ async function main() {
   await cdp.send('Runtime.enable');
 
   const origin = `http://127.0.0.1:${PORT}`;
-  const base = `${origin}/app.html`;
+  const base = `${origin}/`;
 
   /** 完成今日一项任务：旧 UI 是「开始→完成→填时长」，新 UI 待完成项直接「补录」 */
   /** 填写完成表单（用时 + 完成度默认 100）并确认 */
@@ -191,44 +191,30 @@ async function main() {
     }
   };
 
-  // 0. 根路径必须是产品主页，且「进入」指向学习空间
+  // 0. 根路径直接是应用主界面（提交版删掉了落地页与登录页）
   await cdp.send('Page.navigate', { url: `${origin}/` });
-  await sleep(1200);
-  let home = await cdp.text();
-  assert(home.includes('计划会变化'), '根路径不是产品主页');
-  assert(home.includes('四个空间'), '主页缺少功能介绍');
-  await cdp.shot('00-home');
-  await cdp.click('进入');
   await sleep(1500);
-  home = await cdp.text();
-  assert(home.includes('登录') || home.includes('还没有目标'), '主页「进入」未跳转到学习空间');
-  console.log('✓ 主页存在，「进入」可跳转到应用');
+  const home = await cdp.text();
+  assert(home.includes('今日'), '根路径未渲染今日页');
+  assert(!home.includes('注册') && !home.includes('忘记密码'), '提交版不应再有登录/注册入口');
+  await cdp.shot('00-home');
+  console.log('✓ 根路径直进今日页，无需登录');
 
-  // 1. 未登录：应看到登录页
+  // 1. 未登录深链也应直达应用：没有会话就用演示账号
   await cdp.send('Page.navigate', { url: `${base}#report` });
   await sleep(1500);
   let body = await cdp.text();
-  assert(body.includes('登录') && body.includes('智学节律'), '未登录时未渲染登录页');
-  assert(!body.includes('一周复盘'), '未登录却能看到周报内容');
-  await cdp.shot('01-login');
-  console.log('✓ 登录页渲染正常');
+  assert(!body.includes('登录') && !body.includes('注册'), '不应再出现登录页');
+  await cdp.shot('01-home-deeplink');
+  console.log('✓ 未登录深链直达应用');
 
-  // 2. 注册并进入应用
-  const status = await cdp.eval(`
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'e2e@test.dev', password: 'password123', name: '林同学' }),
-    });
-    return res.status;
-  `);
-  assert(status === 200, `注册接口返回 ${status}`);
+  // 2. 首次启动是空状态（演示账号在全新库里没有任何数据）
   await cdp.send('Page.navigate', { url: base });
   await sleep(1500);
   body = await cdp.text();
-  assert(body.includes('还没有目标') || body.includes('载入示例数据'), '登录后未进入空状态引导');
+  assert(body.includes('还没有目标') || body.includes('载入示例数据'), '未进入空状态引导');
   await cdp.shot('02-empty');
-  console.log('✓ 注册 + 会话建立正常');
+  console.log('✓ 演示账号空状态正常');
 
   // 2b. 顶栏「设置目标」在每一页都可见，且能跳到目标页
   await cdp.eval(`window.confirm = () => true; return true;`);
@@ -497,25 +483,6 @@ async function main() {
   await cdp.shot('07-settings');
   console.log('✓ 设置保存生效');
 
-  // 8b. 修改密码（当前设备保持登录）
-  const pwdFilled = await cdp.eval(`
-    const inputs = [...document.querySelectorAll('.form-grid input[type="password"]')];
-    if (inputs.length < 2) return false;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(inputs[0], 'password123');
-    inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-    setter.call(inputs[1], 'newpassword456');
-    inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  `);
-  assert(pwdFilled, '未找到修改密码输入框');
-  await cdp.click('保存新密码');
-  await sleep(1000);
-  body = await cdp.text();
-  assert(body.includes('密码已更新'), '修改密码未成功');
-  await cdp.shot('07b-password');
-  console.log('✓ 修改密码成功且当前会话保持');
-
   await cdp.click('周视图');
   await sleep(600);
   await cdp.click('重新排这一周');
@@ -590,23 +557,13 @@ async function main() {
   assert(!body.includes('离线模式'), '联网后未恢复在线模式');
   console.log('✓ 联网后恢复在线模式');
 
-  // 9. 登出后回到登录页（新 UI 的登出入口在「设置」页底部）
+  // 9. 设置页不再有账号管理入口（提交版免登录）
   await cdp.click('设置');
   await sleep(700);
-  await cdp.click('退出登录');
-  await sleep(1000);
   body = await cdp.text();
-  assert(body.includes('登录') && !body.includes('达 成'), '登出后未回到登录页');
-  await cdp.shot('08-logout');
-  console.log('✓ 登出正常');
-
-  // 10. 忘记密码入口与恢复码表单
-  await cdp.click('忘记密码');
-  await sleep(500);
-  body = await cdp.text();
-  assert(body.includes('恢复码') && body.includes('新密码'), '找回密码表单未渲染');
-  await cdp.shot('09-recover');
-  console.log('✓ 忘记密码入口可用');
+  assert(!body.includes('退出登录') && !body.includes('注销账号'), '设置页仍有账号管理入口');
+  assert(body.includes('演示模式'), '设置页缺少演示模式说明');
+  console.log('✓ 设置页已无账号管理入口');
 
   assert(cdp.errors.length === 0, `控制台出现错误：${cdp.errors.join(' | ')}`);
   console.log('✓ 浏览器控制台无报错');

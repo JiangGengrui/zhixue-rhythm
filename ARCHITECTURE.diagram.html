@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8" /><title>智学节律 · 助手子系统架构图</title>
+<style>
+:root{--bg:#05080d;--ink:#e9f2f0;--ink2:#93a6b0;--ink3:#5d707a;--line:rgba(255,255,255,.09);
+--sans:Inter,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;--mono:ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;padding:36px 44px 46px;font-family:var(--sans);color:var(--ink);
+background:radial-gradient(1100px 520px at 82% -8%,rgba(43,230,174,.09),transparent 62%),
+radial-gradient(900px 460px at 0% 108%,rgba(72,200,255,.07),transparent 58%),var(--bg)}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px}
+h1{margin:0;font-size:21px;font-weight:640}
+.sub{margin-top:7px;color:var(--ink3);font-size:13px}
+.stamp{font-family:var(--mono);font-size:11px;color:var(--ink3);text-align:right;line-height:1.7}
+svg{width:100%;height:auto;display:block;margin-top:6px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.card{border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035);padding:14px 16px}
+.card h3{margin:0 0 8px;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.dot{width:7px;height:7px;border-radius:2px}
+.card ul{margin:0;padding-left:15px;color:var(--ink2);font-size:12px;line-height:1.7}
+footer{margin-top:14px;font-size:11px;color:var(--ink3);line-height:1.7}
+code{font-family:var(--mono);font-size:10.5px;color:var(--ink2)}
+</style></head>
+<body>
+<header>
+  <div><h1>智学节律 · 助手子系统架构</h1>
+  <div class="sub">单容器 Node + SQLite，领域逻辑前后端共用，SSE 一问一答</div></div>
+  <div class="stamp">ARCHITECTURE.md v1.0<br />2026-11-09</div>
+</header>
+<svg viewBox="0 0 1420 760" role="img" aria-label="助手子系统架构图">
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d828c"/></marker>
+  <marker id="ar-hi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2be6ae"/></marker>
+</defs>
+<rect x="400" y="60" width="780" height="640" rx="16" fill="rgba(255,255,255,.014)" stroke="rgba(255,255,255,.14)" stroke-dasharray="7 6"/>
+<text x="418" y="86" fill="#93a6b0" font-size="12">CloudBase 云托管 · 单容器（静态与 API 同源，无 CORS）</text>
+
+<rect x="120" y="80" width="120" height="50" rx="11" fill="rgba(169,139,255,.10)" stroke="rgba(169,139,255,.42)"/>
+<text x="180" y="102" fill="#e9f2f0" font-size="13" text-anchor="middle">用户浏览器</text>
+<text x="180" y="119" fill="#7f8f99" font-size="10.5" text-anchor="middle">桌面优先</text>
+
+<rect x="110" y="180" width="150" height="56" rx="11" fill="rgba(72,200,255,.09)" stroke="rgba(72,200,255,.38)"/>
+<text x="185" y="203" fill="#e9f2f0" font-size="13" text-anchor="middle">React 单页</text>
+<text x="185" y="221" fill="#7f8f99" font-size="10.5" text-anchor="middle">hash 路由 · 五页</text>
+
+<rect x="110" y="290" width="150" height="56" rx="11" fill="rgba(72,200,255,.09)" stroke="rgba(72,200,255,.38)"/>
+<text x="185" y="313" fill="#e9f2f0" font-size="13" text-anchor="middle">助手面板</text>
+<text x="185" y="331" fill="#7f8f99" font-size="10.5" text-anchor="middle">周条带 · 380×560</text>
+<rect x="430" y="100" width="160" height="50" rx="11" fill="rgba(255,112,112,.08)" stroke="rgba(255,112,112,.35)"/>
+<text x="510" y="122" fill="#e9f2f0" font-size="13" text-anchor="middle">Cookie 会话</text>
+<text x="510" y="139" fill="#7f8f99" font-size="10.5" text-anchor="middle">zx_sid · scrypt · Lax</text>
+
+<rect x="430" y="190" width="160" height="56" rx="11" fill="rgba(43,230,174,.08)" stroke="rgba(43,230,174,.35)"/>
+<text x="510" y="213" fill="#e9f2f0" font-size="13" text-anchor="middle">node:http 单进程</text>
+<text x="510" y="231" fill="#7f8f99" font-size="10.5" text-anchor="middle">静态托管 + /api</text>
+
+<rect x="640" y="190" width="140" height="56" rx="11" fill="rgba(43,230,174,.08)" stroke="rgba(43,230,174,.35)"/>
+<text x="710" y="213" fill="#e9f2f0" font-size="13" text-anchor="middle">路由分发</text>
+<text x="710" y="231" fill="#7f8f99" font-size="10.5" text-anchor="middle">route(method,path)</text>
+
+<rect x="830" y="190" width="170" height="56" rx="11" fill="rgba(43,230,174,.12)" stroke="rgba(43,230,174,.5)"/>
+<text x="915" y="213" fill="#e9f2f0" font-size="13" text-anchor="middle">助手路由</text>
+<text x="915" y="231" fill="#7f8f99" font-size="10.5" text-anchor="middle">A 答疑 / B 数据 · SSE</text>
+
+<rect x="1240" y="180" width="150" height="50" rx="11" fill="rgba(169,139,255,.10)" stroke="rgba(169,139,255,.42)"/>
+<text x="1315" y="202" fill="#e9f2f0" font-size="13" text-anchor="middle">上游模型</text>
+<text x="1315" y="219" fill="#7f8f99" font-size="10.5" text-anchor="middle">OpenAI 兼容 · 可缺席</text>
+
+<rect x="830" y="310" width="150" height="56" rx="11" fill="rgba(43,230,174,.08)" stroke="rgba(43,230,174,.35)"/>
+<text x="905" y="333" fill="#e9f2f0" font-size="13" text-anchor="middle">词面检索</text>
+<text x="905" y="351" fill="#7f8f99" font-size="10.5" text-anchor="middle">bigram · 24 条语料</text>
+
+<rect x="1000" y="310" width="150" height="56" rx="11" fill="rgba(43,230,174,.08)" stroke="rgba(43,230,174,.35)"/>
+<text x="1075" y="333" fill="#e9f2f0" font-size="13" text-anchor="middle">只读工具 ×5</text>
+<text x="1075" y="351" fill="#7f8f99" font-size="10.5" text-anchor="middle">返回已算好的数</text>
+
+<rect x="940" y="440" width="150" height="56" rx="11" fill="rgba(242,180,87,.09)" stroke="rgba(242,180,87,.38)"/>
+<text x="1015" y="463" fill="#e9f2f0" font-size="13" text-anchor="middle">SQLite WAL</text>
+<text x="1015" y="481" fill="#7f8f99" font-size="10.5" text-anchor="middle">10 旧表 + 3 新表</text>
+
+<path d="M180,130 V178" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="190" y="158" fill="#6d828c" font-size="10.5">HTTPS</text>
+<path d="M185,236 V288" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<path d="M260,208 H428" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="300" y="200" fill="#6d828c" font-size="10.5">静态 + /api 同源</text>
+<path d="M510,150 V188" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="518" y="176" fill="#6d828c" font-size="10.5">currentUser</text>
+<path d="M590,218 H638" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<path d="M780,218 H828" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="784" y="210" fill="#6d828c" font-size="10.5">/api/assistant/*</text>
+<path d="M1000,215 H1238" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="1060" y="207" fill="#6d828c" font-size="10.5">流式 token</text>
+<path d="M905,246 V308" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="912" y="284" fill="#6d828c" font-size="10.5">search()</text>
+<path d="M1000,240 H1030 V308" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="1036" y="262" fill="#6d828c" font-size="10.5">规则表选工具</text>
+<path d="M990,246 V438" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="997" y="420" fill="#6d828c" font-size="10.5">会话 + 埋点</text>
+<path d="M1075,366 V438" stroke="#6d828c" stroke-width="1.4" marker-end="url(#ar)" fill="none"/>
+<text x="1082" y="404" fill="#6d828c" font-size="10.5">只读 SQL · user_id</text>
+<path d="M185,346 V660 H800 V235 H828" stroke="#2be6ae" stroke-width="1.6" marker-end="url(#ar-hi)" fill="none"/>
+<text x="235" y="650" fill="#2be6ae" font-size="11">SSE over POST · fetch + ReadableStream</text>
+</svg>
+
+<div class="cards">
+  <div class="card"><h3><span class="dot" style="background:#48c8ff"></span>结构事实</h3><ul>
+    <li>领域逻辑只有一份：<code>src/domain</code> 打包成 <code>engine.generated.mjs</code>，前后端共用</li>
+    <li>助手答的周报数字与 <code>#report</code> 页面同源，不需要第二套统计</li>
+    <li>面板脱离路由挂载，切 tab 不丢会话</li></ul></div>
+  <div class="card"><h3><span class="dot" style="background:#2be6ae"></span>两条链路</h3><ul>
+    <li>A 类：检索 24 条语料 → 命中即答，未命中走兜底，<b>不转 B</b></li>
+    <li>B 类：规则表选工具 → 只读工具 → 数字注入 prompt</li>
+    <li>共用一条 SSE 通道与一张 <code>assistant_events</code> 埋点表</li></ul></div>
+  <div class="card"><h3><span class="dot" style="background:#f2b457"></span>降级与边界</h3><ul>
+    <li>无 Key / 上游失败 / 工具异常 三条独立降级路径，均以 <code>degraded</code> 暴露</li>
+    <li>三张新表都带 <code>user_id</code>，工具禁止裸查询</li>
+    <li>反代需 <code>X-Accel-Buffering: no</code>，否则首字退化到完整时长</li></ul></div>
+</div>
+<footer>手绘 SVG 版。archify CLI 在本机因文件系统身份校验失败（<code>sidecar-case-semantics-indeterminate</code> / <code>delivery-ownership-lost</code>）无法出图，此为技能允许的人工兜底路径，未经其自动校验。</footer>
+</body></html>

@@ -26,25 +26,25 @@ export const FEEDBACK_REASONS: ReasonOption[] = [
 ];
 
 /**
- * 空态建议问题：2 个功能类 + 2 个数据类（SPEC R8），按「有没有自己的数据」切换。
+ * 空态建议问题：功能答疑已移除，只留 4 个数据类，按「有没有自己的数据」切换。
  * 还没有目标/计划时再问「这周还剩多少」只会得到「先建目标」，所以换成引导式问法。
  */
 export function suggestionsFor(hasData: boolean): Suggestion[] {
   if (!hasData) {
     return [
-      { mode: 'knowledge', text: '怎么设置目标和截止日？' },
-      { mode: 'knowledge', text: '周计划是怎么排出来的？' },
-      // 这两句都含数据指代词（「我的目标」「今天任务」），才会真的走数据类分支；
+      // 都含数据指代词（「我的目标」「今天任务」），才会真的走数据分支；
       // 无目标时工具返回空，助手据此引导先建目标，而不是答一堆通用建议
       { mode: 'data', text: '今天任务从哪开始？' },
       { mode: 'data', text: '我的目标还能达成吗？' },
+      { mode: 'data', text: '这周排了多少时间？' },
+      { mode: 'data', text: '今天做了多久？' },
     ];
   }
   return [
-    { mode: 'knowledge', text: '周计划是怎么排出来的？' },
-    { mode: 'knowledge', text: '怎么调整每周可用时间？' },
     { mode: 'data', text: '这周还剩多少任务？' },
     { mode: 'data', text: '今天的安排还剩多少？' },
+    { mode: 'data', text: '我这周排了多少时间？' },
+    { mode: 'data', text: '今天做了多久？' },
   ];
 }
 

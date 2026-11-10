@@ -5,7 +5,8 @@ import { feedbackPayload, type FeedbackReason } from './suggestions';
 /** 与服务端同一条上限（SPEC R7）：超了在前端就拦住，别让用户白等一次网络往返 */
 export const MAX_QUESTION_CHARS = 500;
 
-export type AssistantMode = 'knowledge' | 'data';
+/** 提交版只保留数据通道；功能答疑（知识库）已移除 */
+export type AssistantMode = 'data';
 
 export interface Citation {
   doc: string;
@@ -35,6 +36,11 @@ export interface AssistantMessage {
   /** 还在收字，气泡里显示占位文案而不是空白 */
   pending?: boolean;
   failed?: boolean;
+  /**
+   * 流式回答按收到的顺序切开的分段。渲染时每段包一层 span 各自淡入，
+   * 后到的字就不会「整块跳出来」；历史消息没有这个字段，退回渲染 content。
+   */
+  chunks?: string[];
 }
 
 interface ChatState {
@@ -137,7 +143,7 @@ export function useAssistant() {
         messages: [
           ...prev.messages,
           { id: nextId('q'), role: 'user', content: question, citations: [] },
-          { id: replyId, role: 'assistant', content: '', citations: [], pending: true },
+          { id: replyId, role: 'assistant', content: '', citations: [], chunks: [], pending: true },
         ],
         status: '',
         busy: true,
@@ -152,7 +158,7 @@ export function useAssistant() {
           if (frame.event === 'meta') {
             const meta = asRecord(frame.data);
             if (typeof meta?.sessionId === 'string') sessionIdRef.current = meta.sessionId;
-            const mode = meta?.mode === 'data' ? 'data' : meta?.mode === 'knowledge' ? 'knowledge' : undefined;
+            const mode = meta?.mode === 'data' ? 'data' : undefined;
             const degraded = meta?.degraded === true;
             patch(replyId, (message) => ({ ...message, mode, degraded }));
           } else if (frame.event === 'status') {
@@ -161,7 +167,12 @@ export function useAssistant() {
           } else if (frame.event === 'delta') {
             const text = textOf(frame.data);
             if (!text) continue;
-            patch(replyId, (message) => ({ ...message, content: message.content + text }));
+            // 同时记一份分段：渲染层靠它让新到的字单独淡入
+            patch(replyId, (message) => ({
+              ...message,
+              content: message.content + text,
+              chunks: [...(message.chunks ?? []), text],
+            }));
           } else if (frame.event === 'done') {
             const done = asRecord(frame.data);
             finished = true;

@@ -141,11 +141,13 @@ async function serveStatic(pathname, res) {
     const content = await readFile(filePath);
     res.writeHead(200, {
       'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream',
-      // 只有带 hash 的构建产物才能长缓存；入口 HTML 用短缓存，既不让发版更新滞后太久，
-      // 又能在断网时命中缓存完成离线冷启动
+      // 带 hash 的构建产物才能长缓存；入口 HTML 必须每次协商，否则改版后用户会拿着旧
+      // HTML 去引用已经不存在的 hash 资源；字体等静态资源用短缓存，够离线冷启动
       'Cache-Control': /[\\/]assets[\\/]/.test(filePath)
         ? 'public, max-age=31536000, immutable'
-        : 'public, max-age=600',
+        : /\.html$/.test(filePath)
+          ? 'no-cache'
+          : 'public, max-age=600',
     });
     res.end(content);
   } catch {

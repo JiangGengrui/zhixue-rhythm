@@ -199,7 +199,7 @@ const shot = async (name) => {
   console.log(`  · ${OUT}/${name}.png`);
 };
 const go = async (hash, wait = 1800) => {
-  await send('Page.navigate', { url: `${base}/app.html${hash}` });
+  await send('Page.navigate', { url: `${base}/${hash}` });
   await sleep(wait);
 };
 
@@ -234,7 +234,12 @@ await send('Runtime.evaluate', {
 await sleep(900);
 await shot('goal-decompose');
 
-// 产品主页
+// 目标页主界面：检查计划项面板的空间分配
+await send('Page.navigate', { url: `${base}/#goal` });
+await sleep(2600);
+await shot('goal');
+
+// 应用首页（今日）
 await send('Page.navigate', { url: `${base}/` });
 await sleep(2600);
 await shot('home');

@@ -21,13 +21,6 @@ export function SettingsPage({
   const [weekStart, setWeekStart] = useState<0 | 1>(state.settings.weekStart);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [password, setPassword] = useState('');
-  const [curPwd, setCurPwd] = useState('');
-  const [newPwd, setNewPwd] = useState('');
-  const [pwdMsg, setPwdMsg] = useState('');
-  const [pwdBusy, setPwdBusy] = useState(false);
-  const [delMsg, setDelMsg] = useState('');
-  const [delBusy, setDelBusy] = useState(false);
 
   const totalMinutes = useMemo(
     () => hours.reduce((s, h) => s + Math.max(0, Math.round(h * 60)), 0),
@@ -61,7 +54,7 @@ export function SettingsPage({
           </div>
           <h1>设置</h1>
           <p className="sub">
-            当前账号 <b>{state.user?.name}</b>（{state.user?.email}）
+            演示模式 · 免登录，数据保存在本机服务端
           </p>
         </div>
       </header>
@@ -117,100 +110,15 @@ export function SettingsPage({
             </div>
           </Panel>
 
-          <Panel title="修改密码" desc="修改成功后，其它设备上的登录会话会全部失效">
-            <div className="form-grid">
-              <Field label="当前密码">
-                <input
-                  type="password"
-                  value={curPwd}
-                  autoComplete="current-password"
-                  onChange={(e) => setCurPwd(e.target.value)}
-                />
-              </Field>
-              <Field label="新密码" hint="至少 8 位">
-                <input
-                  type="password"
-                  value={newPwd}
-                  autoComplete="new-password"
-                  onChange={(e) => setNewPwd(e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className="row" style={{ marginTop: 14 }}>
-              <Button
-                variant="primary"
-                disabled={pwdBusy}
-                onClick={async () => {
-                  setPwdMsg('');
-                  if (newPwd.length < 8) {
-                    setPwdMsg('新密码至少 8 位');
-                    return;
-                  }
-                  setPwdBusy(true);
-                  try {
-                    await actions.changePassword(curPwd, newPwd);
-                    setCurPwd('');
-                    setNewPwd('');
-                    setPwdMsg('密码已更新，当前设备保持登录');
-                  } catch (err) {
-                    setPwdMsg(err instanceof Error ? err.message : '修改失败');
-                  } finally {
-                    setPwdBusy(false);
-                  }
-                }}
-              >
-                {pwdBusy ? '保存中…' : '保存新密码'}
-              </Button>
-              {pwdMsg && <span className="notice">{pwdMsg}</span>}
-            </div>
-          </Panel>
-
-          <Panel title="账号与数据" desc="按账号隔离，可随时导出">
+          <Panel title="数据" desc="存在本机 SQLite，可随时导出">
             <ul className="bullets">
-              <li>当前账号：{state.user?.name}（{state.user?.email}）</li>
-              <li>会话有效期 30 天，退出后需重新登录。</li>
+              <li>演示版免登录，打开即是同一个演示账号。</li>
+              <li>数据写入运行目录的 data/zhixue.db，重启不丢。</li>
             </ul>
 
             <div className="row" style={{ marginTop: 14 }}>
               <Button onClick={() => { location.href = api.exportUrl('json'); }}>导出全部数据（JSON）</Button>
               <Button onClick={() => { location.href = api.exportUrl('csv'); }}>导出任务记录（CSV）</Button>
-            </div>
-
-            <div className="danger-zone">
-              <strong>注销账号</strong>
-              <p className="muted">目标、计划项与全部打卡记录会被永久删除，无法恢复。</p>
-              <div className="row">
-                <input
-                  type="password"
-                  placeholder="输入密码确认"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-                <Button
-                  variant="danger"
-                  disabled={delBusy}
-                  onClick={async () => {
-                    if (!password) {
-                      setDelMsg('请输入密码');
-                      return;
-                    }
-                    if (!confirm('注销后所有数据将被永久删除，确定继续？')) return;
-                    setDelBusy(true);
-                    setDelMsg('');
-                    try {
-                      await actions.deleteAccount(password);
-                    } catch (err) {
-                      setDelMsg(err instanceof Error ? err.message : '注销失败');
-                    } finally {
-                      setDelBusy(false);
-                    }
-                  }}
-                >
-                  {delBusy ? '注销中…' : '注销账号'}
-                </Button>
-              </div>
-              {delMsg && <span className="warn">{delMsg}</span>}
             </div>
           </Panel>
 
@@ -221,7 +129,7 @@ export function SettingsPage({
           <Panel title="外观">
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div>
-                <b style={{ fontSize: 13 }}>{theme === 'dark' ? '深空' : '冷光'}</b>
+                <b style={{ fontSize: 12 }}>{theme === 'dark' ? '深空' : '冷光'}</b>
                 <p className="muted" style={{ marginTop: 4 }}>
                   {theme === 'dark' ? '适合夜间与长时间专注' : '适合白天与明亮环境'}
                 </p>
@@ -230,12 +138,8 @@ export function SettingsPage({
             </div>
           </Panel>
 
-          <Panel title="会话" desc="30 天免登录">
+          <Panel title="本周概览" desc="当前演示账号的数据">
             <div className="stack-tight">
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="muted">登录邮箱</span>
-                <b style={{ fontSize: 12 }}>{state.user?.email}</b>
-              </div>
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <span className="muted">本周任务块</span>
                 <b className="mono">{state.blocks.length}</b>
@@ -245,9 +149,6 @@ export function SettingsPage({
                 <b className="mono">{state.items.length}</b>
               </div>
             </div>
-            <Button variant="quiet" style={{ marginTop: 14, paddingLeft: 0 }} onClick={() => void actions.logout()}>
-              退出登录 →
-            </Button>
           </Panel>
         </div>
       </div>
@@ -283,14 +184,14 @@ function FeedbackAdmin() {
     <Panel title="留言管理" desc="主页留言板的公开内容；隐藏后访客不可见，可恢复。">
       {msg && <p className="notice">{msg}</p>}
       {items.length === 0 ? (
-        <p style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>暂无留言。</p>
+        <p style={{ fontSize: 12, color: 'var(--ink-3)' }}>暂无留言。</p>
       ) : (
         <ul className="bullets">
           {items.map((f) => (
             <li key={f.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
               <span style={{ flex: 1 }}>
-                <b style={{ fontSize: 12.5 }}>{f.nickname || '匿名'}</b>
-                <span style={{ fontSize: 12.5 }}>：{f.content}</span>
+                <b style={{ fontSize: 12 }}>{f.nickname || '匿名'}</b>
+                            <span style={{ fontSize: 12 }}>：{f.content}</span>
                 {f.hidden && <span className="pill tone-amber">已隐藏</span>}
               </span>
               <Button variant="quiet" size="sm" onClick={() => void toggle(f.id, f.hidden)}>

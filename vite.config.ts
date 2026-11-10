@@ -6,12 +6,11 @@ const page = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
-  // 多页：根入口是产品主页（index.html），学习空间在 app.html
+  // 提交版只保留一个应用入口：`/` 直接进今日页，不再有落地页与登录页
   build: {
     rollupOptions: {
       input: {
-        home: page('./index.html'),
-        app: page('./app.html'),
+        app: page('./index.html'),
         privacy: page('./privacy.html'),
       },
     },

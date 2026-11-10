@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { FEEDBACK_REASONS, feedbackPayload, suggestionsFor } from './suggestions';
 
 describe('空态建议问题（R8）', () => {
-  it('两组都是 4 条，且各含 2 个功能类 + 2 个数据类', () => {
+  it('两组都是 4 条，且全是数据类（功能答疑已移除）', () => {
     for (const hasData of [true, false]) {
       const list = suggestionsFor(hasData);
       expect(list).toHaveLength(4);
-      expect(list.filter((item) => item.mode === 'knowledge')).toHaveLength(2);
-      expect(list.filter((item) => item.mode === 'data')).toHaveLength(2);
+      expect(list.every((item) => item.mode === 'data')).toBe(true);
     }
   });
 

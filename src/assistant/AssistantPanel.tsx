@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import {
-  MAX_QUESTION_CHARS,
-  useAssistant,
-  type AssistantMessage,
-  type Citation,
-} from './useAssistant';
+import { MAX_QUESTION_CHARS, useAssistant, type AssistantMessage } from './useAssistant';
 import { FEEDBACK_REASONS, suggestionsFor } from './suggestions';
 
 /** 条带上的一列：日期、星期几、当天任务数与已完成数 */
@@ -15,34 +10,9 @@ export interface WeekDaySummary {
   done: number;
 }
 
-const MODE_LABEL = { knowledge: '功能答疑', data: '你的数据' } as const;
-const MODE_HINT = {
-  knowledge: '来自功能说明',
-  data: '基于你的记录',
-} as const;
-
-/**
- * 引用 chip：有 `route` 的可点，跳对应页面；没有对应页面的（讲技术栈 / 部署）渲染成纯文本，
- * 点了不许报错。两侧都带 `title`，鼠标悬停能看清是哪一条。
- */
-export function CitationChip({ citation }: { citation: Citation }) {
-  if (!citation.route) {
-    return (
-      <span className="assistant-chip" title={`${citation.title} · 无对应页面`}>
-        {citation.title}
-      </span>
-    );
-  }
-  return (
-    <a
-      className="assistant-chip link"
-      href={`#${citation.route}`}
-      title={`跳转到「${citation.title}」`}
-    >
-      {citation.title}
-    </a>
-  );
-}
+// 功能答疑已移除，只剩下「问自己的数据」这一种回答
+const MODE_LABEL = { data: '你的数据' } as const;
+const MODE_HINT = { data: '基于你的记录' } as const;
 
 /** 复制优先走异步剪贴板；http 非 localhost 下它不存在，退回 execCommand，别让按钮点了没反应 */
 async function copyText(text: string): Promise<boolean> {
@@ -71,10 +41,23 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 function ReplyBody({ message, status }: { message: AssistantMessage; status: string }) {
+  // 流式回答按收到的分段渲染：每段一个 span，新到的字单独淡入，接缝处不会整块跳
+  const chunks = message.chunks ?? [];
   return (
     <div className={`assistant-bubble ${message.failed ? 'failed' : ''}`}>
       {message.content ? (
-        <p className="assistant-text">{message.content}</p>
+        chunks.length > 0 ? (
+          <p className="assistant-text">
+            {chunks.map((chunk, index) => (
+              <span className="assistant-chunk" key={`${message.id}-${index}`}>
+                {chunk}
+              </span>
+            ))}
+            {message.pending ? <span className="assistant-caret" aria-hidden="true" /> : null}
+          </p>
+        ) : (
+          <p className="assistant-text">{message.content}</p>
+        )
       ) : (
         <p className="assistant-text empty">{status || '正在组织回答…'}</p>
       )}
@@ -83,19 +66,8 @@ function ReplyBody({ message, status }: { message: AssistantMessage; status: str
       {message.pending && message.content ? <p className="assistant-note">{status || '继续生成中…'}</p> : null}
 
       {message.incomplete ? <p className="assistant-note warn">这次回答不完整，可以再问一次。</p> : null}
-      {/* 只有数据类才有「降级」含义；知识类的 degraded 只表示没接模型，正文仍是语料原文 */}
       {message.degraded && message.mode === 'data' ? (
         <p className="assistant-note">这条回答没有用到你的实时数据。</p>
-      ) : null}
-      {message.fallback ? <p className="assistant-note">这条还没有标准答案，下面是我按功能整理的理解。</p> : null}
-
-      {message.citations.length > 0 ? (
-        <div className="assistant-cites">
-          <span className="assistant-cites-label">来源</span>
-          {message.citations.map((citation) => (
-            <CitationChip key={`${citation.doc}:${citation.title}`} citation={citation} />
-          ))}
-        </div>
       ) : null}
     </div>
   );
@@ -238,7 +210,7 @@ export function AssistantPanel({
           <header className="assistant-head">
             <div>
               <strong>学习助手</strong>
-              <p>可以问功能怎么用，也可以问这周还剩多少任务</p>
+              <p>只答你自己的数据，比如今天做了多久、这周还剩多少任务</p>
             </div>
             <div className="assistant-head-actions">
               {messages.length > 0 ? (

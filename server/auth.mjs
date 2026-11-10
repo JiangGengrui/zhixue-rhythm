@@ -60,19 +60,75 @@ export function sessionCookie(token, maxAgeSeconds) {
 
 export const clearCookie = 'zx_sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0';
 
-/** 从请求中解析用户；过期会话会被清理 */
+/* ------------------------------------------------------------------ *
+ * 提交版演示账号
+ *
+ * 交付的 demo 删掉了登录与注册界面，打开就要能直接用，所以匿名请求
+ * 一律回落到同一个演示账号上。数据仍然落在 SQLite 里（重启不丢），
+ * 只是不再按账号隔离——这是演示版的取舍，需要真实账号体系时设
+ * `ZHIXUE_DEMO=0` 即可恢复原来的行为。
+ * ------------------------------------------------------------------ */
+
+export const DEMO_EMAIL = 'demo@zhixue.local';
+
+/** 默认免登录；`ZHIXUE_DEMO=0` 关闭 */
+export function demoMode() {
+  return process.env.ZHIXUE_DEMO !== '0';
+}
+
+/** 首次访问时建出演示账号，之后复用同一行，保证数据连续 */
+export function ensureDemoUser(db) {
+  const read = () =>
+    db
+      .prepare('SELECT id, email, name, week_start, weekdays FROM users WHERE email = ?')
+      .get(DEMO_EMAIL);
+  const existing = read();
+  if (existing) return existing;
+  db.prepare(
+    'INSERT INTO users (id, email, name, pass_hash, week_start, weekdays, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    newId('u'),
+    DEMO_EMAIL,
+    '演示同学',
+    // 不是可用的密码哈希：`verifyPassword` 解析不出 scrypt 结构，任何密码都验不过，
+    // 演示账号因此不可能被当成普通账号登录
+    'demo$no-login$0',
+    1,
+    JSON.stringify([120, 150, 150, 150, 150, 150, 120]),
+    nowISO(),
+  );
+  return read();
+}
+
+function demoSession(db) {
+  const user = ensureDemoUser(db);
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    token: 'demo',
+    isAdmin: false,
+    demo: true,
+    settings: {
+      weekStart: user.week_start === 0 ? 0 : 1,
+      weekdays: safeWeekdays(user.weekdays),
+    },
+  };
+}
+
+/** 从请求中解析用户；过期会话会被清理；没登录时回落到演示账号 */
 export function currentUser(db, req) {
   const token = parseCookies(req.headers.cookie).zx_sid;
-  if (!token) return null;
+  if (!token) return demoMode() ? demoSession(db) : null;
   const row = db
     .prepare(
       'SELECT s.token, s.expires_at, u.id, u.email, u.name, u.week_start, u.weekdays, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
     )
     .get(token);
-  if (!row) return null;
+  if (!row) return demoMode() ? demoSession(db) : null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
     destroySession(db, token);
-    return null;
+    return demoMode() ? demoSession(db) : null;
   }
   return {
     id: row.id,

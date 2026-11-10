@@ -295,7 +295,7 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
 
       {notice && <p className="notice">{notice}</p>}
 
-      <div className="grid-main">
+      <div className="grid-main goal-grid">
         <div className="col">
           <section className="panel accent rise">
             <div className="hero-row">
@@ -350,12 +350,15 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
                 {items.map((i) => (
                   <li key={i.id}>
                     <span className={`tag tag-${i.subject}`}>{SUBJECT_LABEL[i.subject]}</span>
+                    {/* 标题单独一行可换行，时长/剩余/权重收进第二行，窄栏里不再互相挤 */}
                     <strong title={i.title}>{i.title}</strong>
-                    <span className="muted mono">{fmtDuration(i.estimateMin)}</span>
-                    {typeof i.remainingMin === 'number' && i.remainingMin !== i.estimateMin && (
-                      <span className="muted">剩 {fmtDuration(i.remainingMin)}</span>
-                    )}
-                    <span className="muted">W{i.weight}</span>
+                    <span className="item-meta">
+                      <span className="mono">{fmtDuration(i.estimateMin)}</span>
+                      {typeof i.remainingMin === 'number' && i.remainingMin !== i.estimateMin && (
+                        <span>剩 {fmtDuration(i.remainingMin)}</span>
+                      )}
+                      <span>W{i.weight}</span>
+                    </span>
                     <Button variant="quiet" size="sm" onClick={() => actions.removeItem(i.id)} aria-label={`删除 ${i.title}`}>
                       删除
                     </Button>

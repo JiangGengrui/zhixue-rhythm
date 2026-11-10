@@ -12,6 +12,9 @@ import { todayISO } from './engine.generated.mjs';
 // 测试必须自洽：本机若配了真实的 ASSISTANT_API_KEY，B 类用例会真的去请求上游，
 // 结果取决于网络而不是代码。服务启动前清掉，保证「无 Key」是确定的前提。
 delete process.env.ASSISTANT_API_KEY;
+// 账号相关用例断言「未登录 = 401」，这里显式关掉演示免登录；
+// 免登录本身由文件末尾的用例单独验证（临时把开关打回 1）。
+process.env.ZHIXUE_DEMO = '0';
 
 const app = startServer({ dbFile: ':memory:' });
 await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
@@ -850,25 +853,24 @@ async function chat(question, cookie, sessionId, date) {
   return { status: res.status, meta, done, text, events };
 }
 
-test('助手：A 类问题以 SSE 直答语料原文，并落库成两条消息', async () => {
+test('助手：功能答疑已移除，问法一律走数据通道，不再返回语料原文', async () => {
   const { cookie } = await register('assist-a@test.dev');
-  const expected = KNOWLEDGE.find((entry) => entry.id === 'goal-set');
+  const corpus = KNOWLEDGE.find((entry) => entry.id === 'goal-set');
 
   const r = await chat('怎么设置目标', cookie);
   assert.equal(r.status, 200);
-  assert.equal(r.meta.mode, 'knowledge');
+  // 提交版只保留数据通道：语料直答的 mode=knowledge 不应再出现
+  assert.equal(r.meta.mode, 'data');
   assert.ok(r.meta.sessionId.startsWith('sess_'));
-  // A 类正文必须与语料逐字一致（SPEC R2），所以用全等而不是包含
-  assert.equal(r.text, expected.answer);
-  assert.ok(r.done.citations.length >= 1 && r.done.citations.length <= 3);
-  assert.equal(r.done.citations[0].doc, expected.doc);
+  assert.equal(r.done.citations.length, 0, '不再有知识库引用');
   assert.equal(r.done.fallback, false);
+  assert.notEqual(r.text, corpus.answer, '不该再逐字复述语料');
 
   const detail = await call('GET', `/api/assistant/sessions/${r.meta.sessionId}`, null, cookie);
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.json.messages.map((m) => m.role), ['user', 'assistant']);
   assert.equal(detail.json.messages[0].content, '怎么设置目标');
-  assert.equal(detail.json.messages[1].content, expected.answer);
+  assert.equal(detail.json.messages[1].content, r.text);
 
   const list = await call('GET', '/api/assistant/sessions', null, cookie);
   assert.deepEqual(list.json.sessions.map((s) => s.id), [r.meta.sessionId]);
@@ -980,14 +982,15 @@ test('助手：故障注入三条路径（无 Key / 上游 500 / 超时）都落
   assert.equal(normal.done.degraded, false);
 });
 
-test('助手：未命中语料返回兜底文案且无引用', async () => {
+test('助手：没有可引用的数据时给引导，不再回知识库兜底文案', async () => {
   const { cookie } = await register('assist-fb@test.dev');
   const r = await chat('帮我写首诗', cookie);
 
   assert.equal(r.status, 200);
-  assert.equal(r.text, FALLBACK_TEXT);
-  assert.deepEqual(r.done.citations, []);
-  assert.equal(r.done.fallback, true);
+  assert.equal(r.meta.mode, 'data');
+  assert.deepEqual(r.done.citations, [], '引用通道已随知识库一起移除');
+  assert.notEqual(r.text, FALLBACK_TEXT, '知识库兜底文案不该再出现');
+  assert.match(r.text, /周|计划|目标/, `无数据也要说清楚缺什么：${r.text}`);
 });
 
 test('助手反馈：赞、踩带原因、取消都落库，别人的消息改不动', async () => {
@@ -1165,6 +1168,27 @@ test('助手工具：同一份 /api/state 下，get_today 的数字与接口逐�
   );
   assert.equal(result.data.blocks[0].title, '高数第一章');
   assert.equal(result.data.blocks[0].estimateMin, 120, '估时要能从 items 关联出来');
+});
+
+test('演示模式：不登录也拿到同一个演示账号，匿名可读写', async () => {
+  process.env.ZHIXUE_DEMO = '1';
+  try {
+    const first = await call('GET', '/api/me', null, null);
+    assert.equal(first.status, 200);
+    assert.equal(first.json.user.demo, true);
+    assert.equal(first.json.user.email, 'demo@zhixue.local');
+
+    // 第二次仍落到同一账号：不能每次请求都新建一个 demo 用户
+    const second = await call('GET', '/api/me', null, null);
+    assert.equal(second.json.user.id, first.json.user.id);
+
+    // 匿名的业务请求同样可用，评审打开页面就能直接操作
+    const state = await call('GET', '/api/state', null, null);
+    assert.equal(state.status, 200);
+    assert.ok(Array.isArray(state.json.blocks));
+  } finally {
+    process.env.ZHIXUE_DEMO = '0';
+  }
 });
 
 test.after(async () => {

@@ -6,12 +6,10 @@ import { nowISO, nowLocalISO } from './db.mjs';
 import {
   createSessionStore, MAX_DAILY_QUESTIONS, nextShanghaiMidnightISO, normalizeSession,
 } from './assistant/sessions.mjs';
-import { answerFromKnowledge } from './assistant/retrieval.mjs';
-import { MAX_QUESTION_CHARS, streamModelReply, streamReply } from './assistant/chat.mjs';
-import { classify, hasDataSignal, planTools } from './assistant/route.mjs';
+import { MAX_QUESTION_CHARS, streamModelReply } from './assistant/chat.mjs';
+import { planTools } from './assistant/route.mjs';
 import { buildFacts, createToolbox } from './assistant/tools.mjs';
 import { applyFault, resolveFault } from './assistant/faults.mjs';
-import { isLlmConfigured } from './assistant/llm.mjs';
 import { buildReport, decomposeGoal, evaluateAlerts, packWeek, planReplan, TEMPLATE_LIST, todayISO } from './engine.generated.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -292,7 +290,8 @@ export function createApi(db) {
       return { ok: true };
     },
 
-    'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email, isAdmin: !!user.isAdmin } }),
+    // demo: true 表示这是免登录的演示账号，前端据此隐藏账号管理入口
+    'GET /api/me': ({ user }) => ({ user: { id: user.id, name: user.name, email: user.email, isAdmin: !!user.isAdmin, demo: !!user.demo } }),
 
     // 站内通知：拉取时先跑一遍预警规则（同类别同日只落一条），再返回列表与未读数
     'GET /api/notifications': ({ user }) => {
@@ -876,7 +875,7 @@ export function createApi(db) {
     // 面板不接这个入口（DECISIONS D8.1），留给排障与脚本：只返回当前用户最近 20 条
     'GET /api/assistant/sessions': ({ user }) => ({ sessions: chat.list(user.id, 20) }),
 
-    // 助手问答：阶段 1 只走语料直答（不调模型），SSE 骨架与落库/配额先跑通
+    // 助手问答：只走「问自己的数据」这一条通道（功能答疑已移除）
     'POST /api/assistant/chat': async ({ user, body, res }) => {
       const question = typeof body?.question === 'string' ? body.question.trim() : '';
       if (!question) throw bad('E1001', '问题不能为空');
@@ -896,51 +895,31 @@ export function createApi(db) {
       // 面板上点了条带里的某天就带上它。不合法当没传：UI 的小错不该把提问变成 400
       const focusDate = isISODate(body?.date) ? body.date : undefined;
 
-      // B 类：先取只读工具事实，再让模型把数字讲顺；取不到事实就不调模型（DECISIONS D9.2）
-      //
-      // 「今天做了多久」「这周排了多少分钟」不含 §5.1.1 的指代词，但明显是在问自己的数据。
-      // 判定顺序仍是「指代词 → B、检索命中 → A、其余兜底」，只是兜底时先看有没有数据可讲：
-      // 知识库检索不到就直接取数回答，而不是回一句「这个问题我暂时没有把握」。
-      const knowledge = classify(question) === 'data' ? null : answerFromKnowledge(question);
-      // 只有「知识库没命中 + 问法里有取数信号」才改走 B 类：
-      // 否则「帮我写首诗」也会被拉去查数据，回一段无关的周计划
-      if (knowledge === null || (knowledge.mode === 'fallback' && hasDataSignal(question))) {
-        // today 换成所选日期：get_today 取的是那天，「今天做了多久」才不会答成今天
-        const toolbox = createToolbox({ state: stateOf(user), today: focusDate });
-        const names = planTools(question);
-        const results = await Promise.all(names.map((name) => toolbox.call(name)));
-        const facts = buildFacts(results);
-        // 显式告诉模型它在讲哪一天，避免它把 focusDate 的数据说成「今天」
-        if (facts && focusDate) facts.focusDate = focusDate;
-        // 故障注入只改「模型这一段」，工具事实照常取：这样三条降级路径的
-        // 前置条件（有事实、有权限）与生产一致，测的才是真正的降级分支
-        const override = applyFault(resolveFault());
-        await streamModelReply({
-          res,
-          store: chat,
-          userId: user.id,
-          question,
-          sessionId: session.id,
-          mode: 'data',
-          history: chat.recentMessages(user.id, session.id, 6),
-          // buildFacts 在「一个工具都没成功」时返回 null，正好让 streamModelReply 走降级
-          facts: facts ?? undefined,
-          toolCalls: results.map(({ name, status }) => ({ name, status })),
-          ...override,
-        });
-        return { __sent: true };
-      }
-
-      // A 类不调模型：正文就是语料 answer 原文，可逐字比对（SPEC R2）
-      await streamReply({
+      // 先取只读工具事实，再让模型把数字讲顺；取不到事实就不调模型（DECISIONS D9.2）。
+      // 提交版移除了知识库直答，问题一律走这条数据通道：答不出数据时由
+      // streamModelReply 走固定文案降级，不会退化成编造数字。
+      // today 换成所选日期：get_today 取的是那天，「今天做了多久」才不会答成今天
+      const toolbox = createToolbox({ state: stateOf(user), today: focusDate });
+      const names = planTools(question);
+      const results = await Promise.all(names.map((name) => toolbox.call(name)));
+      const facts = buildFacts(results);
+      // 显式告诉模型它在讲哪一天，避免它把 focusDate 的数据说成「今天」
+      if (facts && focusDate) facts.focusDate = focusDate;
+      // 故障注入只改「模型这一段」，工具事实照常取：这样三条降级路径的
+      // 前置条件（有事实、有权限）与生产一致，测的才是真正的降级分支
+      const override = applyFault(resolveFault());
+      await streamModelReply({
         res,
         store: chat,
         userId: user.id,
         question,
         sessionId: session.id,
-        answer: knowledge,
-        // 与 B 类同一套判定：空串 / 纯空格的 Key 都算「没配」，避免前端显示成已接入模型
-        degraded: !isLlmConfigured(),
+        mode: 'data',
+        history: chat.recentMessages(user.id, session.id, 6),
+        // buildFacts 在「一个工具都没成功」时返回 null，正好让 streamModelReply 走降级
+        facts: facts ?? undefined,
+        toolCalls: results.map(({ name, status }) => ({ name, status })),
+        ...override,
       });
       return { __sent: true };
     },
