@@ -6,11 +6,11 @@
 
 [在线体验](https://zhixue-rhythm-343909-9-1412780291.sh.run.tcloudbase.com/) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.4.0-2be6ae)
+![version](https://img.shields.io/badge/version-1.5.0-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
-![tests](https://img.shields.io/badge/tests-187%20passed-2be6ae)
+![tests](https://img.shields.io/badge/tests-188%20passed-2be6ae)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
@@ -56,7 +56,9 @@ npm install
 npm start            # 构建 + 启动：# http://localhost:8787
 ```
 
-打开即用：提交版是**免登录**的演示形态，没有注册与登录界面，所有数据落在同一个演示账号上（`demo@zhixue.local`）。功能答疑也已移除，助手只答你自己的数据。
+打开后先看到**落地页**，点「免费开始」进登录页：可以注册账号，也可以在登录页点**「免注册登录 · 直接开始使用」**，服务端会当场建一个独立的游客账号并下发会话，试用与测试用这一条最省事。注册成功会弹一次**恢复码**（忘记密码只能靠它重置），设置页里可以改密码、退出登录、注销账号。
+
+账号体系默认开启：未登录访问 `/api/*` 返回 401。需要「打开就能用」的演示形态时设 `ZHIXUE_DEMO=1`，匿名请求会回落到同一个演示账号（数据不隔离）。
 
 开发模式（前端热更新，API 与静态资源分离）：
 
@@ -177,15 +179,15 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 |---|---|
 | 领域单测（44） | 空数据、容量为 0、超额、跨天拆分、确定性、目标日期已过、裁断顺序、重排硬约束 |
 | 接口测试（24） | 越权隔离、幂等、非法状态迁移、导出、注销、恢复码、重叠校验、拆解与重排 |
-| 端到端 | 免登录直进 → 拆解 → 排程 → 移动任务 → 打卡 → 断网补传 → 周报 → 改设置 |
+| 端到端 | 落地页 → 登录 / 免注册登录 → 拆解 → 排程 → 移动任务 → 打卡 → 断网补传 → 周报 → 改设置 → 退出登录 |
 
-安全边界：所有查询按 `user_id` 过滤，越权读写返回 404；口令与 Cookie 不进日志；请求体上限 1 MB；登录与留言按 IP 限流。**提交版是单账号演示**：免登录，数据不按账号隔离，需要真实账号体系时设 `ZHIXUE_DEMO=0`。
+安全边界：所有查询按 `user_id` 过滤，越权读写返回 404；口令与 Cookie 不进日志；请求体上限 1 MB；登录与留言按 IP 限流。**默认要求登录**：未登录访问业务接口返回 401；免注册登录建的游客账号只能从那个入口进入，没有可用密码，数据与正式账号互相隔离。
 
 界面风格：像素主题。字体分两套并全部本地内嵌（`public/fonts/`，不请求外部 CDN）：**寒蝉点阵体 7px** 用于标题与大数字（字号 14/21/28，7 的整数倍），**Fusion Pixel 12px**（比例版 + 等宽版，OFL 授权）用于界面小字（字号 12）。所有字号收敛到 12 / 14 / 21 / 28 四档——点阵字体只有字号是网格整数倍时才不会被插值糊掉。授权说明见 `public/fonts/README.txt`。
 
 ## 版本
 
-当前 **v1.4.0**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
+当前 **v1.5.0**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
 
 | 版本 | 主题 |
 |---|---|
@@ -203,6 +205,8 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | v1.3.0 | 执行计时/部分完成、预警与通知中心、块锁定与草案编辑、离线冷启动、留言管理与隐私页 |
 | v1.3.1 | 排程算法重写（按天轮转均分）与计划控制修复（补排避让、重排落库、24:00 夹逼、容量单源） |
 | v1.3.2 | 界面精简（设置表单弹窗化、删除原理说明卡片）与计划链修复（通知去重时区、完成表单、离线计时、跨周生成、入口缓存） |
+| v1.4.0 | 像素主题（寒蝉点阵体 + Fusion Pixel 双字体、字号四档收敛）、目标页两列布局 |
+| v1.5.0 | 落地页与登录页回归、免注册登录（游客账号）、通知弹窗定位修复 |
 
 ## 已知限制
 
