@@ -262,6 +262,25 @@ export function createApi(db) {
       return { user: { id: row.id, name: row.name, email: row.email } };
     },
 
+    /**
+     * 免注册登录：直接建一个独立的游客账号并下发会话，用于试用与测试。
+     * pass_hash 不是可用的 scrypt 结构，恢复码为空，所以这个账号无法用
+     * 密码登录、也无法找回——只能从登录页的「免注册登录」进来，
+     * 数据仍然按账号隔离，不会污染别人的数据。
+     */
+    'POST /api/auth/guest': ({ res }) => {
+      const id = newId('usr');
+      const email = `${id}@guest.local`;
+      const name = '测试同学';
+      q.insertUser.run(
+        id, email, name, 'guest$no-login$0', null,
+        '[120,150,150,150,150,150,120]', nowISO(),
+      );
+      const { token } = createSession(db, id);
+      res.setHeader('Set-Cookie', sessionCookie(token, 30 * 86400));
+      return { user: { id, name, email }, guest: true };
+    },
+
     'POST /api/auth/recover': ({ body, res, ip }) => {
       if (!allowLogin(ip, 'recover')) throw new HttpError(429, 'E2002', '尝试过于频繁，请稍后再试');
       const email = str(body.email, '邮箱', 120).toLowerCase();

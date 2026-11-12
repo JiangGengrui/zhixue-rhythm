@@ -61,19 +61,19 @@ export function sessionCookie(token, maxAgeSeconds) {
 export const clearCookie = 'zx_sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0';
 
 /* ------------------------------------------------------------------ *
- * 提交版演示账号
+ * 演示账号（可选兜底）
  *
- * 交付的 demo 删掉了登录与注册界面，打开就要能直接用，所以匿名请求
- * 一律回落到同一个演示账号上。数据仍然落在 SQLite 里（重启不丢），
- * 只是不再按账号隔离——这是演示版的取舍，需要真实账号体系时设
- * `ZHIXUE_DEMO=0` 即可恢复原来的行为。
+ * 完整产品形态下未登录会拿到 401，前端据此显示落地页与登录页；
+ * 需要「打开就能用」的演示形态时设 `ZHIXUE_DEMO=1`，匿名请求一律
+ * 回落到同一个演示账号。登录页上的「免注册登录」走的是另一条路
+ * （`POST /api/auth/guest`），会建出独立的游客账号，数据仍然隔离。
  * ------------------------------------------------------------------ */
 
 export const DEMO_EMAIL = 'demo@zhixue.local';
 
-/** 默认免登录；`ZHIXUE_DEMO=0` 关闭 */
+/** 默认关闭；`ZHIXUE_DEMO=1` 开启匿名回落演示账号 */
 export function demoMode() {
-  return process.env.ZHIXUE_DEMO !== '0';
+  return process.env.ZHIXUE_DEMO === '1';
 }
 
 /** 首次访问时建出演示账号，之后复用同一行，保证数据连续 */

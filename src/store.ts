@@ -31,6 +31,8 @@ const emptyState: AppState = {
 
 export interface Actions {
   login: (email: string, password: string) => Promise<void>;
+  /** 免注册登录：直接拿到一个游客账号，用于试用与测试 */
+  guestLogin: () => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<string>;
   recover: (email: string, recoveryCode: string, newPassword: string) => Promise<string>;
   dismissRecovery: () => void;
@@ -167,6 +169,11 @@ export function useAppState() {
     },
     [load],
   );
+
+  const guestLogin = useCallback(async () => {
+    await api.guest();
+    await load();
+  }, [load]);
 
   const register = useCallback(
     async (email: string, password: string, name: string) => {
@@ -576,7 +583,7 @@ export function useAppState() {
     offlineSince,
     notifs,
     actions: {
-      login, register, recover, dismissRecovery, logout, refresh: load,
+      login, guestLogin, register, recover, dismissRecovery, logout, refresh: load,
       setGoal, addItem, removeItem, updateSettings, generateWeek, setBlockStatus, seedDemo, deleteAccount,
       pauseBlock, resumeBlock, setBlockLocked, moveBlock, deleteBlock, changePassword, flushOps, decompose, replan, applyReplan, loadNotifications, markNotificationsRead,
     } satisfies Actions,

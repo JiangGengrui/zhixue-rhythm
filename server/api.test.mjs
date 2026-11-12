@@ -55,6 +55,28 @@ test('未登录访问受保护接口返回 401', async () => {
   assert.equal(r.json.error.code, 'E2001');
 });
 
+test('免注册登录：新建独立游客账号并下发会话', async () => {
+  const a = await call('POST', '/api/auth/guest', {});
+  assert.equal(a.status, 200);
+  assert.equal(a.json.guest, true);
+  assert.ok(a.cookie, '应下发会话 cookie');
+
+  const me = await call('GET', '/api/me', null, a.cookie);
+  assert.equal(me.status, 200);
+  assert.equal(me.json.user.name, '测试同学');
+
+  // 每次都是新账号，数据互相隔离
+  const b = await call('POST', '/api/auth/guest', {});
+  assert.notEqual(b.json.user.id, a.json.user.id);
+
+  // 游客账号没有可用密码，不能从登录接口进来
+  const bad = await call('POST', '/api/auth/login', {
+    email: a.json.user.email,
+    password: 'guest$no-login$0',
+  });
+  assert.equal(bad.status, 401);
+});
+
 test('注册、重复注册与错误密码登录', async () => {
   const a = await register('a@test.dev');
   assert.ok(a.cookie);
@@ -351,7 +373,9 @@ test('撤销完成：剩余工时按完成度退还', async () => {
 test('通知中心：预警生成、同日去重、全部已读', async () => {
   const { cookie } = await register('notify@test.dev');
   // deadline 3 天后 + 大量剩余需求 → deadline-risk danger
-  await call('PUT', '/api/goal', { title: 'g', deadline: '2026-11-11', weeklyMinutes: 300, level: 'once' }, cookie);
+  // 日期按当前时间推算，避免写死的日期随时间推移失效
+  const deadline = new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
+  await call('PUT', '/api/goal', { title: 'g', deadline, weeklyMinutes: 300, level: 'once' }, cookie);
   await call('POST', '/api/items', { title: 'A', subject: 'math', estimateMin: 1200, weight: 5 }, cookie);
 
   const first = await call('GET', '/api/notifications', null, cookie);

@@ -106,6 +106,8 @@ export const api = {
     request<{ ok: true; recoveryCode: string }>('POST', '/api/auth/recover', input),
   login: (input: { email: string; password: string }) =>
     request<{ user: SessionUser }>('POST', '/api/auth/login', input),
+  /** 免注册登录：服务端建游客账号并下发会话，用于试用与测试 */
+  guest: () => request<{ user: SessionUser }>('POST', '/api/auth/guest', {}),
   logout: () => request<{ ok: true }>('POST', '/api/auth/logout', {}),
   state: () => request<ServerState>('GET', '/api/state'),
   putGoal: (goal: Omit<Goal, 'id' | 'createdAt'>) =>

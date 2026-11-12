@@ -54,7 +54,7 @@ export function SettingsPage({
           </div>
           <h1>设置</h1>
           <p className="sub">
-            演示模式 · 免登录，数据保存在本机服务端
+            {state.user ? `${state.user.name} · ${state.user.email}` : '账号与数据都保存在服务端'}
           </p>
         </div>
       </header>
@@ -112,7 +112,7 @@ export function SettingsPage({
 
           <Panel title="数据" desc="存在本机 SQLite，可随时导出">
             <ul className="bullets">
-              <li>演示版免登录，打开即是同一个演示账号。</li>
+              <li>数据按账号隔离，只有登录你账号的设备能看到。</li>
               <li>数据写入运行目录的 data/zhixue.db，重启不丢。</li>
             </ul>
 
@@ -126,6 +126,8 @@ export function SettingsPage({
         </div>
 
         <div className="col">
+          {state.user && <AccountPanel user={state.user} actions={actions} />}
+
           <Panel title="外观">
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div>
@@ -138,7 +140,7 @@ export function SettingsPage({
             </div>
           </Panel>
 
-          <Panel title="本周概览" desc="当前演示账号的数据">
+          <Panel title="本周概览" desc="当前账号的数据">
             <div className="stack-tight">
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <span className="muted">本周任务块</span>
@@ -156,6 +158,144 @@ export function SettingsPage({
   );
 }
 
+
+function AccountPanel({
+  user,
+  actions,
+}: {
+  user: NonNullable<AppState['user']>;
+  actions: Actions;
+}) {
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [delPwd, setDelPwd] = useState('');
+  const [delArmed, setDelArmed] = useState(false);
+  const [busy, setBusy] = useState<null | 'pwd' | 'del'>(null);
+
+  async function submitPassword() {
+    setPwdMsg('');
+    if (curPwd.length < 8) {
+      setPwdMsg('当前密码至少 8 位');
+      return;
+    }
+    if (newPwd.length < 8) {
+      setPwdMsg('新密码至少 8 位');
+      return;
+    }
+    setBusy('pwd');
+    try {
+      await actions.changePassword(curPwd, newPwd);
+      setCurPwd('');
+      setNewPwd('');
+      setPwdMsg('已修改，其它设备需要重新登录');
+    } catch (err) {
+      setPwdMsg(err instanceof Error ? err.message : '修改失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeAccount() {
+    setPwdMsg('');
+    if (delPwd.length < 8) {
+      setPwdMsg('请输入密码确认');
+      return;
+    }
+    setBusy('del');
+    try {
+      await actions.deleteAccount(delPwd);
+    } catch (err) {
+      setPwdMsg(err instanceof Error ? err.message : '注销失败');
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Panel title="账号" desc="登录状态与账号安全">
+      <div className="stack-tight">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <span className="muted">昵称</span>
+          <b>{user.name}</b>
+        </div>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <span className="muted">邮箱</span>
+          <b className="mono" style={{ fontSize: 12 }}>
+            {user.email}
+          </b>
+        </div>
+      </div>
+
+      <div className="form-grid" style={{ marginTop: 14, maxWidth: 260 }}>
+        <Field label="当前密码">
+          <input
+            type="password"
+            value={curPwd}
+            autoComplete="current-password"
+            onChange={(e) => setCurPwd(e.target.value)}
+          />
+        </Field>
+        <Field label="新密码" hint="至少 8 位，修改后其它设备会掉线">
+          <input
+            type="password"
+            value={newPwd}
+            autoComplete="new-password"
+            onChange={(e) => setNewPwd(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <div className="row" style={{ marginTop: 12 }}>
+        <Button onClick={() => void submitPassword()} disabled={busy !== null}>
+          {busy === 'pwd' ? '修改中…' : '修改密码'}
+        </Button>
+        {pwdMsg && <span className="notice">{pwdMsg}</span>}
+      </div>
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--hair)' }}>
+        <b style={{ fontSize: 12 }}>注销账号</b>
+        <p className="muted" style={{ marginTop: 6 }}>
+          会删除账号与全部数据，无法恢复。
+        </p>
+        {delArmed ? (
+          <div className="row" style={{ marginTop: 10 }}>
+            <input
+              type="password"
+              value={delPwd}
+              placeholder="输入密码确认"
+              style={{ maxWidth: 180 }}
+              onChange={(e) => setDelPwd(e.target.value)}
+            />
+            <Button variant="danger" onClick={() => void removeAccount()} disabled={busy !== null}>
+              {busy === 'del' ? '注销中…' : '确认注销'}
+            </Button>
+            <Button
+              variant="quiet"
+              onClick={() => {
+                setDelArmed(false);
+                setDelPwd('');
+              }}
+            >
+              取消
+            </Button>
+          </div>
+        ) : (
+          <Button variant="quiet" style={{ marginTop: 10 }} onClick={() => setDelArmed(true)}>
+            我要注销账号
+          </Button>
+        )}
+      </div>
+
+      <Button
+        variant="quiet"
+        style={{ marginTop: 14, paddingLeft: 0 }}
+        onClick={() => void actions.logout()}
+      >
+        退出登录 →
+      </Button>
+    </Panel>
+  );
+}
 
 function FeedbackAdmin() {
   const [items, setItems] = useState<

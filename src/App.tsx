@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import {
   Button,
@@ -16,6 +16,8 @@ import { TodayPage } from './pages/TodayPage';
 import { WeekPage } from './pages/WeekPage';
 import { ReportPage } from './pages/ReportPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { LandingPage } from './pages/LandingPage';
+import { AuthPage } from './pages/AuthPage';
 import { AssistantPanel } from './assistant/AssistantPanel';
 import { startOfWeek, todayISO, weekDates, weekdayOf } from './domain/date';
 
@@ -168,8 +170,39 @@ function NotificationBell({
   );
 }
 
+/** 注册成功后必须让用户看到一次性恢复码，否则忘记密码就再也找不回账号 */
+function RecoveryNotice({ code, onClose }: { code: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label="请保存恢复码">
+      <div className="modal-card">
+        <strong style={{ fontSize: 14 }}>请保存你的恢复码</strong>
+        <p>忘记密码时只能用它重置，关闭后不再显示。</p>
+        <code className="recovery-code">{code}</code>
+        <div className="row">
+          <Button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(code);
+                setCopied(true);
+              } catch {
+                setCopied(false);
+              }
+            }}
+          >
+            {copied ? '已复制' : '复制恢复码'}
+          </Button>
+          <Button variant="primary" onClick={onClose}>
+            我已保存
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const { phase, error, state, actions, pendingOps, notifs, offlineSince } = useAppState();
+  const { phase, error, state, actions, recoveryCode, pendingOps, notifs, offlineSince } = useAppState();
 
   // 通知轮询：登录态下每 60 秒刷新一次预警
   useEffect(() => {
@@ -178,6 +211,15 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [phase, actions]);
   const { theme, toggle } = useTheme();
+  // 未登录时的入口：先落在落地页，再从落地页进登录/注册；登出后回到落地页
+  const [entry, setEntry] = useState<'landing' | 'auth'>('landing');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const prevPhase = useRef(phase);
+  useEffect(() => {
+    if (prevPhase.current === 'ready' && phase === 'guest') setEntry('landing');
+    prevPhase.current = phase;
+  }, [phase]);
+
   const [tab, setTab] = useState<Tab>(() => {
     const h = location.hash.slice(1);
     return TABS.some((t) => t.key === h) ? (h as Tab) : 'today';
@@ -240,15 +282,29 @@ export default function App() {
     );
   }
 
-  // 提交版是免登录演示：正常不会走到 guest；真走到这里说明服务端没开演示模式
+  // 未登录：落地页 → 登录/注册。登录成功（含免注册登录）后 phase 变 ready，自动进应用
   if (phase === 'guest') {
+    if (entry === 'landing') {
+      return (
+        <LandingPage
+          theme={theme}
+          onToggleTheme={toggle}
+          onEnter={(mode) => {
+            setAuthMode(mode);
+            setEntry('auth');
+          }}
+        />
+      );
+    }
     return (
-      <div className="boot">
-        <p>演示模式未启用，请用 start.cmd 启动服务后重试。</p>
-        <Button variant="primary" onClick={() => void actions.refresh()}>
-          重试
-        </Button>
-      </div>
+      <AuthPage
+        actions={actions}
+        error={error}
+        theme={theme}
+        onToggleTheme={toggle}
+        onBack={() => setEntry('landing')}
+        initialMode={authMode}
+      />
     );
   }
 
@@ -419,7 +475,7 @@ export default function App() {
 
         <footer className="foot">
           <span>账号与数据保存在服务端 · 会话 30 天</span>
-          <span>引擎：可行性 R 值 / 周装箱 / 偏差与归因（纯函数，可单测）· v1.1.0</span>
+          <span>引擎：可行性 R 值 / 周装箱 / 偏差与归因（纯函数，可单测）· v1.5.0</span>
         </footer>
       </div>
 
@@ -440,6 +496,8 @@ export default function App() {
           );
         })}
       </nav>
+
+      {recoveryCode && <RecoveryNotice code={recoveryCode} onClose={actions.dismissRecovery} />}
 
       {/* 离线时入口禁用，避免点了必然失败的请求 */}
       {(phase === 'ready' || phase === 'offline') && (
