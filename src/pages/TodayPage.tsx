@@ -194,7 +194,7 @@ export function TodayPage({
         <div className="t-act">
           {b.status === 'pending' && (
             <>
-              <Button variant="primary" size="sm" onClick={() => void actions.setBlockStatus(b.id, 'running')}>
+              <Button variant="primary" onClick={() => void actions.setBlockStatus(b.id, 'running')}>
                 开始
               </Button>
               <Button size="sm" onClick={() => startComplete(b)}>
@@ -211,7 +211,7 @@ export function TodayPage({
           )}
           {b.status === 'running' && (
             <>
-              <Button variant="primary" size="sm" onClick={() => startComplete(b)}>
+              <Button variant="primary" onClick={() => startComplete(b)}>
                 完成
               </Button>
               {b.startedAt ? (
@@ -295,7 +295,7 @@ export function TodayPage({
         </div>
         <div className="head-actions">
           <Button onClick={onGoGoal}>设置目标</Button>
-          <Button variant="primary" disabled={busy} onClick={() => void generate()}>
+          <Button variant="primary" size="lg" disabled={busy} onClick={() => void generate()}>
             {busy ? '排程中…' : '生成本周计划'}
           </Button>
         </div>

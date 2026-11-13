@@ -340,23 +340,20 @@ a { color: inherit; }
 .page-enter .page-head .eyebrow,
 .page-enter .page-head h1,
 .page-enter .page-head .sub {
-  animation: textRise 0.62s var(--ease) both;
+  animation: textRise 0.46s var(--ease) both;
 }
 .page-enter .page-head h1 { animation-delay: 0.04s; }
 .page-enter .page-head .sub { animation-delay: 0.11s; }
 
+/* 只做位移 + 透明度：blur 会让点阵字重采样发虚，字距动画会逐帧重排像素网格 */
 @keyframes textRise {
   from {
     opacity: 0;
-    transform: translateY(9px);
-    filter: blur(5px);
-    letter-spacing: 0.04em;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: none;
-    filter: blur(0);
-    letter-spacing: normal;
   }
 }
 
@@ -474,7 +471,9 @@ a { color: inherit; }
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease), transform 0.09s var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-.btn:hover { background: var(--panel-hi); border-color: var(--mint); }
+/* 注意：:hover 的优先级高于 .btn-primary，所以这里不能直接写 background，
+   否则主按钮悬停时渐变底被 --panel-hi 顶掉，浅色文字压在同色底上直接看不见 */
+.btn:where(:not(.btn-primary)):hover { background: var(--panel-hi); border-color: var(--line-2); }
 .btn:active { transform: scale(0.975); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 .btn-primary {
@@ -484,14 +483,26 @@ a { color: inherit; }
   font-weight: 650;
   box-shadow: var(--brand-glow);
 }
-.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 12px 30px rgba(43, 230, 174, 0.3); }
-.btn-quiet { border-color: transparent; background: transparent; color: var(--mint); padding: 7px 9px; }
-.btn-quiet:hover { background: rgba(43, 230, 174, 0.1); border-color: transparent; }
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  background: var(--grad);
+  border-color: var(--mint);
+  color: var(--on-brand);
+  filter: brightness(1.08);
+  box-shadow: 0 12px 30px rgba(43, 230, 174, 0.3);
+}
+/* 弱操作（取消 / 跳过 / 删除 / 撤销）用中性色，把薄荷色留给主操作 */
+.btn-quiet { border-color: transparent; background: transparent; color: var(--ink-2); padding: 7px 9px; }
+.btn-quiet:hover { background: rgba(43, 230, 174, 0.1); border-color: transparent; color: var(--mint); }
 .btn-ghost { border-color: transparent; background: var(--panel-bg-flat); color: var(--ink-2); }
 .btn-ghost:hover { color: var(--ink); background: var(--panel-hi); border-color: var(--line-2); }
 .btn-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); background: transparent; }
 .btn-danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); border-color: var(--red); }
 .btn-sm { padding: 6px 11px; font-size: 12px; border-radius: 10px; }
+/* 页面级主操作：比常规按钮再厚一层，页头只留一个 */
+.btn-lg { padding: 10px 18px; font-weight: 700; min-width: 112px; }
+/* 行内主操作比同排的次要按钮更饱满，避免「开始」看起来比「直接完成」还小 */
+.t-act .btn-primary { min-width: 76px; }
 .btn-icon { padding: 0; width: 34px; height: 34px; border-radius: 10px; }
 .btn-icon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 
@@ -764,10 +775,14 @@ a { color: inherit; }
   font-size: 12px;
   border-left: 2px solid transparent;
   background: var(--s-other-bg);
-  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
   position: relative;
 }
-.slot:hover { filter: brightness(1.14); }
+/* 悬停不再用 filter 提亮：filter 会让点阵字重新插值发虚。
+   只给「可编辑」的块加内描边，空白块保持无反馈，避免误导 */
+.slot:has(.slot-edit):hover {
+  box-shadow: inset 0 0 0 2px var(--mint);
+}
 .slot b {
   font-size: 12px;
   font-weight: 550;
@@ -777,7 +792,7 @@ a { color: inherit; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.slot small { font: 400 12px/1 var(--mono); color: var(--ink-2); opacity: 0.85; }
+.slot small { font: 400 12px/1 var(--mono); color: var(--ink-2); opacity: 0.85; padding-right: 28px; }
 .slot-subject { font-size: 12px; color: var(--ink-3); }
 .slot-math { background: var(--s-math-bg); border-left-color: var(--s-math); }
 .slot-major { background: var(--s-major-bg); border-left-color: var(--s-major); }
@@ -788,11 +803,10 @@ a { color: inherit; }
 .slot-done b { text-decoration: line-through; }
 .slot-empty { margin: auto; font-size: 12px; color: var(--ink-3); opacity: 0.6; text-align: center; padding: 10px 0; }
 .slot:has(.slot-edit) { cursor: pointer; }
-.slot:hover small { opacity: 0; }
 .slot-edit {
   position: absolute;
-  right: 8px;
-  bottom: 7px;
+  right: 6px;
+  bottom: 6px;
   border: 0;
   border-radius: 5px;
   background: color-mix(in srgb, var(--bg) 62%, transparent);
@@ -800,10 +814,11 @@ a { color: inherit; }
   cursor: pointer;
   font-size: 12px;
   color: var(--mint);
-  opacity: 0;
+  opacity: 0.32;
   transition: opacity var(--dur-fast) var(--ease);
 }
-.slot:hover .slot-edit { opacity: 1; }
+.slot:hover .slot-edit,
+.slot-edit:focus-visible { opacity: 1; }
 @media (hover: none) { .slot-edit { opacity: 0.8; } }
 
 /* ── 周报 ── */
@@ -988,6 +1003,12 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   cursor: pointer;
   position: relative;
   flex: none;
+}
+
+/* 原来悬停完全没有反馈，鼠标停在上面像是死的 */
+.theme-toggle:hover {
+  border-color: var(--line-2);
+  color: var(--ink-2);
 }
 .theme-toggle .thumb {
   position: absolute;
@@ -2460,6 +2481,10 @@ body {
   letter-spacing: 0 !important;
 }
 
+/* 像素主题不要玻璃高光：.panel::before 是绝对定位的白蒙版，会盖在面板内容之上，
+   让上面的按钮和点阵字整体发灰 */
+.panel::before { display: none !important; }
+
 /* 点阵字体只有 400 一档：粗体用 1px 整数位移「描粗」，比浏览器合成粗体清楚 */
 strong,
 b,
@@ -2482,6 +2507,14 @@ h3 {
 .draft-row,
 .item-meta {
   font-size: 12px;
+}
+
+/* 落地页 CTA 是 14px，但套的是 12px 网格的界面字体，非整数倍会重新插值发糊；
+   换成 7px 网格的标题字体，14px 正好 2×，边缘才是硬的 */
+.land-cta-main,
+.land-cta-sub {
+  font-family: var(--font-title);
+  font-weight: 400;
 }
 
 /* ── 面板与卡片：2px 描边 + 硬投影 ── */
@@ -2625,7 +2658,7 @@ textarea {
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity 0.16s var(--ease);
 }
 

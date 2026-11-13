@@ -243,7 +243,7 @@ export function GoalPage({ state, actions }: { state: AppState; actions: Actions
           </div>
           <div className="head-actions">
             <Button onClick={actions.seedDemo}>载入示例</Button>
-            <Button variant="primary" onClick={() => setGoalOpen(true)}>
+            <Button variant="primary" size="lg" onClick={() => setGoalOpen(true)}>
               设置目标
             </Button>
           </div>

@@ -166,14 +166,15 @@ export function Sparkbars(props: { values: number[]; todayIndex?: number }) {
 export function Button(
   props: ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: 'primary' | 'ghost' | 'quiet' | 'danger';
-    size?: 'sm' | 'md';
+    size?: 'sm' | 'md' | 'lg';
   },
 ) {
   const { variant = 'ghost', size = 'md', className = '', ...rest } = props;
+  const sizeClass = size === 'sm' ? 'btn-sm' : size === 'lg' ? 'btn-lg' : '';
   return (
     <button
       type="button"
-      className={`btn btn-${variant} ${size === 'sm' ? 'btn-sm' : ''} ${className}`}
+      className={`btn btn-${variant} ${sizeClass} ${className}`}
       {...rest}
     />
   );
