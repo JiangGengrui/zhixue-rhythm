@@ -1,7 +1,7 @@
 # CODEBUDDY.md
 
 本文件是「智学节律」的代码规范与协作约定。四段：项目结构 / 命令 / 代码规范 / 边界。
-`ARCHITECTURE.md` 讲「为什么这么设计」，本文件只讲「改代码时按什么规矩来」。
+`docs/assistant/ARCHITECTURE.md` 讲「为什么这么设计」，本文件只讲「改代码时按什么规矩来」。
 
 ## 1. 项目结构
 
@@ -29,11 +29,11 @@ zhixue-app/
 │  ├─ assistant/            助手子系统：retrieval / knowledge / prompt / tools / llm
 │  └─ *.test.mjs
 ├─ scripts/                 运维与验证脚本：backup / e2e / shot / demo-shots
-├─ docs/                    openapi.yaml、产品文档、截图
+├─ docs/                    openapi.yaml、操作手册、接入说明、产品文档、截图
+│  └─ assistant/            助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
 ├─ data/                    运行期 SQLite 文件（不进版本库）
 ├─ dist/                    vite 构建产物（不进版本库）
 ├─ index.html / privacy.html              两个入口：应用（今日页）/ 隐私说明（多页构建，见 vite.config.ts；落地页与登录页已移除）
-├─ SPEC.md / PLAN.md / ARCHITECTURE.md / DECISIONS.md / ACCEPTANCE.md
 └─ CHANGELOG.md
 ```
 
@@ -84,7 +84,7 @@ npm test
 - 业务计算只写在 `src/domain/`，页面只做「取值 + 渲染 + 派发」。
 - 组件不引第三方 UI 库，样式统一写 `src/styles/app.css`，沿用现有 CSS 变量与命名。
 - dev 下 `/api` 由 vite 代理到 `127.0.0.1:8787`（`vite.config.ts`），所以前端一律用相对路径 `/api/...`，不要写死域名。
-- 面板/弹层类 UI：关闭后必须还原滚动位置；不得让浮层遮挡主操作按钮（见 `PLAN.md` T11 判据）。
+- 面板/弹层类 UI：关闭后必须还原滚动位置；不得让浮层遮挡主操作按钮（见 `docs/assistant/PLAN.md` T11 判据）。
 
 ### 后端
 
@@ -114,11 +114,11 @@ npm test
 |---|---|
 | 引入 Express/Koa/Prisma 等框架或 ORM | 现有 `node:http` + `node:sqlite` 足够，换栈带不出收益 |
 | 引入 UI 组件库 / CSS-in-JS | 现有手写组件与 `styles.css` 已成型 |
-| 改动登录 Cookie 的 `Secure` 属性 | `DECISIONS.md` D8.3，单独立项 |
+| 改动登录 Cookie 的 `Secure` 属性 | `docs/assistant/DECISIONS.md` D8.3，单独立项 |
 | 助手面板做历史会话列表 UI | D8.1（端点保留，界面不接） |
 | 向量检索 / 执行型 Agent（自动改计划） | SPEC R12、R14，本期不做 |
 | 手改 `server/engine.generated.mjs`、`dist/` | 生成物 |
 | 在 `src/domain/` 里写副作用或依赖浏览器 API | 它要在 Node 里被调用 |
-| 为「顺便优化」重构无关文件 | 一次改动只服务一个任务，见 `PLAN.md` §5 |
+| 为「顺便优化」重构无关文件 | 一次改动只服务一个任务，见 `docs/assistant/PLAN.md` §5 |
 
-改动涉及上表任一条时，先在 `DECISIONS.md` 记一条 ADR 并取得确认，再动代码。
+改动涉及上表任一条时，先在 `docs/assistant/DECISIONS.md` 记一条 ADR 并取得确认，再动代码。

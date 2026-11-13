@@ -144,7 +144,9 @@ scripts/
 ├── backup.mjs         数据库冷备（checkpoint + 保留 14 份）
 └── shot.mjs           通用截图（支持浅色主题 / 整页）
 index.html             应用入口（React 应用，打开即是今日页）
+docs/README.md        文档地图（先看这个）
 docs/product/         PRD（V2.0）/ 技术架构设计 / 实施规划
+docs/assistant/       助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
 docs/openapi.yaml     API 契约
 docs/操作手册.md        启动、备份、回滚、排障
 Dockerfile            云托管容器镜像（多阶段构建）
@@ -225,6 +227,8 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | [API 契约](docs/openapi.yaml) | 全部端点的请求/响应与错误码 |
 | [操作手册](docs/操作手册.md) | 启动、备份、回滚、排障 |
 | [拆解与重排接入说明](docs/拆解与重排接入说明.md) | 给前端/UI 的接口形状与呈现约定 |
+| [助手子系统文档](docs/assistant/) | Agent 助手对话：规格、架构、评审、决策、计划、迭代记录 |
+| [文档地图](docs/README.md) | 上表的入口与阅读顺序 |
 
 ## License
 

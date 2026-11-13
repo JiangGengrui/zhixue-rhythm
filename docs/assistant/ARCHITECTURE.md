@@ -4,7 +4,7 @@
 |---|---|
 | 版本 | v1.0 |
 | 日期 | 2026-11-09 |
-| 输入 | `SPEC.md` v1.1、`DECISIONS.md`（D1–D3）、`mockups/assistant-v3-week-strip.html` |
+| 输入 | `SPEC.md` v1.1、`DECISIONS.md`（D1–D3）、`../../mockups/assistant-v3-week-strip.html` |
 | 范围 | 全系统 L1/L2 上下文 + 助手子系统 L3 深入 |
 | 事实基线 | 代码实测：`server/index.mjs`、`server/api.mjs`、`server/db.mjs`、`server/assistant/*`、`src/store.ts` |
 
