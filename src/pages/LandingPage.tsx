@@ -1,4 +1,6 @@
-import { Button, ThemeToggle } from '../components';
+import { Button, DitherBackdrop, ThemeToggle } from '../components';
+import { Surface } from '../Surface';
+import { TaskStack } from '../TaskStack';
 
 const FEATURES = [
   {
@@ -42,9 +44,12 @@ export function LandingPage({
   return (
     <div className="land">
       <div className="land-bg" aria-hidden="true">
-        <span className="land-grid" />
+        <DitherBackdrop />
         <span className="land-glow" />
+        <span className="land-grid" />
+        <span className="land-grain" />
       </div>
+      <Surface />
 
       <header className="land-nav">
         <div className="land-brand">
@@ -160,11 +165,16 @@ export function LandingPage({
             <span>弹性位 · 接住临时插入</span>
             <span className="land-demo-tag">15%</span>
           </div>
+
+          <div className="land-stack-wrap">
+            <TaskStack />
+            <span className="land-stack-cap">一天落一块 · 七天成柱</span>
+          </div>
         </div>
       </main>
 
       <section className="land-features" id="features">
-        <div className="land-sec-head">
+        <div className="land-sec-head" data-reveal>
           <span className="land-kicker">
             <i aria-hidden="true" />
             四个关键设计
@@ -173,7 +183,7 @@ export function LandingPage({
         </div>
         <div className="land-cards">
           {FEATURES.map((f) => (
-            <article className="land-card" key={f.tag}>
+            <article className="land-card" key={f.tag} data-reveal>
               <span className="land-card-tag">{f.tag}</span>
               <h3>{f.title}</h3>
               <p>{f.body}</p>
@@ -183,7 +193,7 @@ export function LandingPage({
       </section>
 
       <section className="land-flow" id="flow">
-        <div className="land-sec-head">
+        <div className="land-sec-head" data-reveal>
           <span className="land-kicker">
             <i aria-hidden="true" />
             一周就是一轮
@@ -192,7 +202,7 @@ export function LandingPage({
         </div>
         <ol className="land-steps">
           {STEPS.map(([no, title, desc]) => (
-            <li key={no}>
+            <li key={no} data-reveal>
               <span className="land-step-no">{no}</span>
               <strong>{title}</strong>
               <p>{desc}</p>
@@ -201,7 +211,7 @@ export function LandingPage({
         </ol>
       </section>
 
-      <section className="land-band" id="start">
+      <section className="land-band" id="start" data-reveal>
         <div>
           <h2>今晚花十分钟，把这一周排明白</h2>
           <p>不绑定手机号，不需要邀请码。先注册一个账号，或者用免注册登录直接看效果。</p>

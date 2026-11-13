@@ -21,11 +21,13 @@
     "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
+    "matter-js": "^0.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@types/matter-js": "^0.20.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

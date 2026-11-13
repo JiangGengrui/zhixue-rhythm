@@ -17,6 +17,8 @@
   --line-2: rgba(255, 255, 255, 0.16);
   --ring-track: rgba(255, 255, 255, 0.13);
   --hair: rgba(255, 255, 255, 0.055);
+  /* 落地页底层点阵的墨色：比 --hair 稍亮一点，肉眼才看得出是“点”而不是脏 */
+  --land-dot: rgba(255, 255, 255, 0.075);
 
   --ink: #e9f2f0;
   --ink-2: #93a6b0;
@@ -66,6 +68,7 @@
   --line-2: #c9d7dd;
   --ring-track: #dbe5e9;
   --hair: rgba(15, 32, 40, 0.07);
+  --land-dot: rgba(15, 32, 40, 0.115);
 
   --ink: #0f1a1f;
   --ink-2: #5a6c75;
@@ -1258,15 +1261,40 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   overflow-x: clip;
 }
 .land-bg { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
-.land-grid {
+
+/* 底层 ①：Bayer 8×8 有序抖动带（WebGL 绘制）。
+   这段 CSS 渐变同时也是回退方案：拿不到 WebGL 上下文时 canvas 不会挂上来，
+   就只剩这层同色系平滑渐变，视觉降级但不空 */
+.land-dither {
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(var(--hair) 1px, transparent 1px),
-    linear-gradient(90deg, var(--hair) 1px, transparent 1px);
-  background-size: 44px 44px;
+  background:
+    radial-gradient(120% 74% at 50% 116%, rgba(43, 230, 174, 0.13), transparent 64%),
+    linear-gradient(180deg, transparent 46%, rgba(43, 230, 174, 0.045));
+  mask-image: radial-gradient(88% 66% at 50% 4%, #000 18%, transparent 82%);
+  -webkit-mask-image: radial-gradient(88% 66% at 50% 4%, #000 18%, transparent 82%);
+}
+[data-theme='light'] .land-dither {
+  background:
+    radial-gradient(120% 74% at 50% 116%, rgba(14, 168, 127, 0.1), transparent 64%),
+    linear-gradient(180deg, transparent 46%, rgba(14, 168, 127, 0.035));
+}
+.land-dither canvas { display: block; width: 100%; height: 100%; }
+
+/* 底层 ②：点阵网格。24px 间距是 12px 字体网格的 2×，与点阵字同构；
+   纵向漂移一整格后无缝循环，18s 一格，慢到只有“在呼吸”的错觉 */
+.land-grid {
+  position: absolute;
+  inset: -24px;
+  background-image: radial-gradient(circle at 1px 1px, var(--land-dot) 1px, transparent 1.7px);
+  background-size: 24px 24px;
   mask-image: radial-gradient(80% 62% at 50% 0%, #000 26%, transparent 76%);
   -webkit-mask-image: radial-gradient(80% 62% at 50% 0%, #000 26%, transparent 76%);
+  animation: landGridDrift 18s linear infinite;
+}
+@keyframes landGridDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, -24px, 0); }
 }
 .land-glow {
   position: absolute;
@@ -1279,6 +1307,29 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   background:
     radial-gradient(680px 420px at 16% 2%, rgba(14, 168, 127, 0.1), transparent 66%),
     radial-gradient(620px 380px at 86% 24%, rgba(46, 150, 216, 0.09), transparent 68%);
+}
+
+/* 底层 ③：颗粒层。内联 feTurbulence，零图片零请求；
+   它在内容之下，mix-blend 只作用于背景，不会糊到文字上。
+   1.6s 一个循环、4 段跳变 ≈ 2.5Hz，低于光敏性癫痫的 3Hz 阈值 */
+.land-grain {
+  position: absolute;
+  inset: -8px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.3'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  /* overlay 在深底上是“提亮”，0.3 实测把底色从 14 推到约 22；
+     再高整页就发灰，颗粒的作用只是抹掉渐变色带，不是让页面变亮 */
+  opacity: 0.3;
+  mix-blend-mode: overlay;
+  animation: landGrainShift 1.6s steps(1) infinite;
+}
+[data-theme='light'] .land-grain { opacity: 0.22; }
+@keyframes landGrainShift {
+  0%,
+  100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(-2px, 1px, 0); }
+  50% { transform: translate3d(1px, -2px, 0); }
+  75% { transform: translate3d(-1px, -1px, 0); }
 }
 .land > header,
 .land > main,
@@ -1299,7 +1350,7 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   backdrop-filter: blur(12px);
 }
 .land-brand { display: flex; align-items: center; gap: 10px; }
-.land-brand strong { display: block; font-size: 14px; }
+.land-brand strong { display: block; font-size: 12px; }
 .land-brand small {
   display: block;
   font-family: var(--font-mono);
@@ -1337,9 +1388,9 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   box-shadow: 0 0 10px rgba(43, 230, 174, 0.7);
 }
 .land-hero h1 {
-  font-family: var(--font-title);
-  font-size: 56px;
-  line-height: 1.16;
+  font-family: var(--font-ui);
+  font-size: 48px;
+  line-height: 1.25;
   letter-spacing: 0;
   margin-top: 20px;
   font-weight: 400;
@@ -1347,12 +1398,13 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
 .land-hero h1 em {
   font-style: normal;
   color: var(--mint);
-  text-shadow: 0 0 26px rgba(43, 230, 174, 0.32);
+  /* 点阵字加模糊光晕会把边缘打成一片虚影，高亮只靠颜色，不再叠发光 */
+  text-shadow: none;
 }
-.land-lead { margin-top: 18px; font-size: 14px; line-height: 1.9; color: var(--ink-2); max-width: 46ch; }
+.land-lead { margin-top: 18px; font-size: 12px; line-height: 1.9; color: var(--ink-2); max-width: 46ch; }
 .land-cta { display: flex; gap: 12px; margin-top: 30px; flex-wrap: wrap; }
-.land-cta-main { padding: 13px 22px; font-size: 14px; }
-.land-cta-sub { padding: 13px 20px; font-size: 14px; }
+.land-cta-main { padding: 13px 22px; font-size: 12px; }
+.land-cta-sub { padding: 13px 20px; font-size: 12px; }
 .land-meta {
   display: grid;
   grid-template-columns: repeat(4, auto);
@@ -1429,13 +1481,76 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
 .land-check { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line-2); flex: none; }
 .land-demo-tag { margin-left: auto; font-family: var(--font-mono); color: var(--ink-3); }
 
+/* 等距体素堆积：物理跑在 Matter.js 里，CSS 只管尺寸和一行说明 */
+.land-stack-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair); }
+.land-stack { display: block; }
+.land-stack canvas { display: block; width: 100%; height: 138px; }
+.land-stack-cap {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* ── 表层动效 ──
+   光斑是定宽、只动 transform 的独立元素：不读 backdrop、不触发重绘，
+   和背景那四层持续合成互不干扰。 */
+.land-spot {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 680px;
+  height: 680px;
+  margin: -340px 0 0 -340px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.5s var(--ease);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--mint) 13%, transparent),
+    transparent 72%
+  );
+}
+/* 只在真的跟着走的时候才提层，不移动时不占一块常驻显存 */
+.land-spot.is-on { opacity: 1; will-change: transform; }
+[data-theme='light'] .land-spot {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--mint) 9%, transparent),
+    transparent 72%
+  );
+}
+
+/* 揭示走 translate 而不是 transform：卡片身上已经有倾斜的 transform，
+   两个属性分开写才不会互相吃掉 */
+.land.reveal-ready [data-reveal] {
+  opacity: 0;
+  translate: 0 16px;
+  transition:
+    opacity 0.55s var(--ease) var(--rd, 0s),
+    translate 0.55s var(--ease) var(--rd, 0s);
+}
+.land.reveal-ready [data-reveal].is-in { opacity: 1; translate: 0 0; }
+/* 错开 60ms 就够了：再长会出现「等它出现」的等待感 */
+.land.reveal-ready [data-reveal]:nth-child(2) { --rd: 0.06s; }
+.land.reveal-ready [data-reveal]:nth-child(3) { --rd: 0.12s; }
+.land.reveal-ready [data-reveal]:nth-child(4) { --rd: 0.18s; }
+
+/* 吸附态只改描边和投影，高度一动就会把下面所有内容挤一下 */
+.land-nav { transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease); }
+.land-nav.is-stuck { border-bottom-color: var(--line); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28); }
+[data-theme='light'] .land-nav.is-stuck { box-shadow: 0 12px 26px rgba(28, 48, 60, 0.1); }
+
 .land-features,
 .land-flow { padding: 78px 0; border-top: 1px solid var(--hair); }
 .land-sec-head { max-width: 640px; margin-bottom: 32px; }
 .land-sec-head h2 {
-  font-family: var(--font-title);
-  font-size: 28px;
-  line-height: 1.3;
+  font-family: var(--font-ui);
+  font-size: 24px;
+  line-height: 1.5;
   font-weight: 400;
   margin-top: 14px;
 }
@@ -1445,11 +1560,16 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-bg-flat);
+  --lift: 0px;
+  --tx: 0deg;
+  --ty: 0deg;
+  /* 上浮走 --lift，倾斜走 --tx/--ty：都合成到一条 transform 里，不互相覆盖 */
+  transform: perspective(760px) translate3d(0, var(--lift), 0) rotateX(var(--tx)) rotateY(var(--ty));
   transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
-.land-card:hover { transform: translateY(-3px); border-color: var(--line-2); }
+.land-card:hover { --lift: -3px; border-color: var(--line-2); }
 .land-card-tag { font-family: var(--font-mono); font-size: 12px; color: var(--mint); letter-spacing: 1px; }
-.land-card h3 { margin-top: 12px; font-size: 14px; }
+.land-card h3 { margin-top: 12px; font-size: 12px; color: var(--ink); }
 .land-card p { margin-top: 8px; font-size: 12px; color: var(--ink-2); line-height: 1.85; }
 
 .land-steps {
@@ -1460,7 +1580,7 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
 }
 .land-steps li { border-top: 1px solid var(--line-2); padding-top: 16px; }
 .land-step-no { font-family: var(--font-mono); font-size: 12px; color: var(--mint); }
-.land-steps strong { display: block; margin-top: 10px; font-size: 14px; }
+.land-steps strong { display: block; margin-top: 10px; font-size: 12px; color: var(--ink); }
 .land-steps p { margin-top: 6px; font-size: 12px; color: var(--ink-2); line-height: 1.85; }
 
 .land-band {
@@ -1474,7 +1594,7 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
   border-radius: var(--radius-sm);
   background: linear-gradient(120deg, rgba(43, 230, 174, 0.12), rgba(72, 200, 255, 0.05));
 }
-.land-band h2 { font-family: var(--font-title); font-size: 28px; font-weight: 400; line-height: 1.3; }
+.land-band h2 { font-family: var(--font-ui); font-size: 24px; font-weight: 400; line-height: 1.5; }
 .land-band p { margin-top: 8px; font-size: 12px; color: var(--ink-2); max-width: 52ch; line-height: 1.85; }
 
 .land-foot {
@@ -1497,17 +1617,17 @@ input[type='time'] { font-family: var(--mono); font-size: 12px; }
 
 @media (max-width: 960px) {
   .land-hero { grid-template-columns: 1fr; padding: 52px 0 60px; }
-  .land-hero h1 { font-size: 42px; }
+  .land-hero h1 { font-size: 36px; }
   .land-links { display: none; }
   .land-meta { grid-template-columns: repeat(2, auto); gap: 18px; }
 }
 @media (max-width: 560px) {
-  .land-hero h1 { font-size: 28px; }
+  .land-hero h1 { font-size: 24px; }
   .land-nav .row { gap: 6px; }
   .land-meta { grid-template-columns: repeat(2, 1fr); }
   .land-features, .land-flow { padding: 52px 0; }
   .land-band { padding: 24px; }
-  .land-band h2 { font-size: 21px; }
+  .land-band h2 { font-size: 24px; }
 }
 
 /* ══ 移动端外壳 ══ */
@@ -2509,13 +2629,26 @@ h3 {
   font-size: 12px;
 }
 
-/* 落地页 CTA 是 14px，但套的是 12px 网格的界面字体，非整数倍会重新插值发糊；
-   换成 7px 网格的标题字体，14px 正好 2×，边缘才是硬的 */
-.land-cta-main,
-.land-cta-sub {
-  font-family: var(--font-title);
-  font-weight: 400;
+/* 12px 的小字必须回落到 12px 网格字体。
+   这些元素常嵌在 .t-title / .stat-value 这类寒蝉（7px 网格）容器里，
+   继承下来就是 12 / 7 = 1.71 倍插值，笔画被抹成灰边、糊成一团——
+   任务卡片的学科标签、时长，统计卡片的「小时」单位都踩了这个坑 */
+.tag,
+.pill,
+small,
+.item-meta,
+.t-time span {
+  font-family: var(--font-ui);
 }
+
+/* 能力卡片的数字用 21px 落在 12px 网格的 1.75 倍上，改 24px 正好 2× */
+.cap-card strong {
+  font-size: 24px;
+}
+
+/* 落地页 CTA 现在是 12px，必须留在 12px 网格字体上。
+   早先为了把 14px 凑成 2×，曾把它切到寒蝉（7px 网格），
+   结果按钮上的汉字在 49 格网格里糊成一团——那条路走不通，已撤回 */
 
 /* ── 面板与卡片：2px 描边 + 硬投影 ── */
 .panel,
@@ -2685,9 +2818,11 @@ textarea {
 
 /* ══════════════════════════════════════════════════════════
    字体分工与字号标尺
-   ─ 界面文字：Fusion Pixel 12px（12px 网格，字号只取 12 的整数倍，1× 渲染 = 像素不糊）
-   ─ 标题数字：寒蝉点阵体（7px 网格，字号只取 14 / 21 / 28，2×/3×/4×）
-   ─ 两套字体都是本地内嵌，各自在自己的整数倍下才是硬边像素
+   ─ 界面与标题：Fusion Pixel 12px（12px 网格，字号只取 12 / 24 / 36，整数倍才不糊）
+   ─ 页面主标题与统计数字：寒蝉点阵体 28px（7px 网格 4×）
+   ─ 7px 网格只有 49 个像素格，写汉字信息量不够：界面用字里有 51 对字形差 ≤3 格，
+     「又/叉」完全同形、「已/己」「存/荐」只差 1 格。所以汉字标题全部交给 12px 网格（144 格），
+     寒蝉只保留短词主标题和数字
    ══════════════════════════════════════════════════════════ */
 
 body {
@@ -2697,18 +2832,8 @@ body {
   letter-spacing: 0;
 }
 
-/* 标题、关键数字切到 7px 网格字体 */
+/* 寒蝉只剩这几处：页面主标题、统计大数字、恢复码和关闭按钮（后两者字符简单） */
 .page-head h1,
-.panel-head h2,
-.modal-head h2,
-.brand strong,
-.auth-side h2,
-.t-title,
-.opt-card h3,
-.notif-head b,
-.item-list strong,
-.day-head b,
-.t-time,
 .stat-value,
 .ring-center b,
 .wk b,
@@ -2720,16 +2845,6 @@ body {
 /* 12px 字体 1px 位移正好等于一个像素格，描粗干净；
    7px 网格在 14px 下一格是 2px，1px 位移只是半格，会重新插值发糊，所以标题一律不加描粗 */
 .page-head h1,
-.panel-head h2,
-.modal-head h2,
-.brand strong,
-.auth-side h2,
-.t-title,
-.opt-card h3,
-.notif-head b,
-.item-list strong,
-.day-head b,
-.t-time,
 .stat-value,
 .ring-center b,
 .wk b {
@@ -2740,17 +2855,32 @@ body {
   font-size: 28px;
 }
 
+/* 面板、弹窗、登录侧栏的块级标题：12px 网格的 24px（2×），比正文大一档 */
 .panel-head h2,
 .modal-head h2,
-.brand strong,
+.auth-side h2 {
+  font-family: var(--font-ui);
+  font-size: 24px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+/* 列表内的标题用 12px 网格的 1×：这些位置塞不下 24px，
+   层级靠亮度（--ink 对 --ink-3）和留白来立 */
 .t-title,
 .opt-card h3,
 .notif-head b,
 .item-list strong,
 .day-head b,
-.t-time {
-  font-size: 14px;
+.t-time,
+.brand strong {
+  font-family: var(--font-ui);
+  font-size: 12px;
   letter-spacing: 0;
+}
+
+.t-title {
+  color: var(--ink);
 }
 
 .stat-value,
@@ -2765,18 +2895,8 @@ body {
   font-size: 21px;
 }
 
-@media (max-width: 1180px) {
-  .page-head h1 {
-    font-size: 28px;
-  }
-}
-
-@media (max-width: 720px) {
-  .page-head h1 {
-    font-size: 21px;
-  }
-}
-
+/* h1 是寒蝉 28px（4×），窄屏不再降到 21px：
+   面板标题现在是 12px 网格的 24px，h1 若降到 21 会比面板标题还小，层级颠倒 */
 @media (max-width: 460px) {
   .stat-value,
   .ring-center b {
