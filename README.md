@@ -15,7 +15,7 @@
 
 </div>
 
-![今日页](docs/screenshots/home.png)
+![落地页](docs/screenshots/home.png)
 
 ## 为什么做这个
 
@@ -47,13 +47,24 @@
 </tr>
 </table>
 
+## 界面与动效
+
+界面不做装饰性动画，只做「让状态变化被看见」这一件事：
+
+| 模块 | 文件 | 做了什么 |
+|---|---|---|
+| 表层动效 | `src/Surface.tsx` | 指针附近的光斑跟随、卡片随指针轻微倾斜、区块进入视口时逐个揭示 |
+| 七天堆积 | `src/TaskStack.tsx` | 用 matter-js 把七天的任务方块按实际时长堆成柱体，静止 24 帧后自动停帧，不常驻耗电 |
+
+两条硬约束：开启「减少动效」时全部动效走 `prefers-reduced-motion` 降级，指针监听整体拆除，不残留状态；`matter-js` 用 `import()` 单独成 chunk（86 KB / gzip 28 KB），主包体积不受影响，去掉物理引擎首屏照常渲染。
+
 ## 快速开始
 
 需要 **Node.js 22+**（后端使用内置的 `node:sqlite`，无第三方数据库依赖）。
 
 ```bash
 npm install
-npm start            # 构建 + 启动：# http://localhost:8787
+npm start            # 构建 + 启动 → http://localhost:8787
 ```
 
 打开后先看到**落地页**，点「免费开始」进登录页：可以注册账号，也可以在登录页点**「免注册登录 · 直接开始使用」**，服务端会当场建一个独立的游客账号并下发会话，试用与测试用这一条最省事。注册成功会弹一次**恢复码**（忘记密码只能靠它重置），设置页里可以改密码、退出登录、注销账号。
@@ -69,7 +80,9 @@ npm run dev          # 终端 2：Vite → :5173，/api 代理到 8787
 
 ## 部署
 
-线上运行在腾讯云 CloudBase **云托管**（容器型），默认域名即上面的「在线体验」地址。仓库内已带好部署文件，无需额外配置：
+当前「在线体验」是 **CloudStudio 沙箱**：本地 `npm run build` 后只上传 `dist/`、`server/`、`package.json` 三部分（约 3.4 MB），容器内不装任何依赖，直接 `node server/index.mjs`。沙箱属于临时环境、可能被回收，长期对外使用应换成云托管或绑定自定义域名。
+
+仓库同时带好了腾讯云 CloudBase **云托管**（容器型）的部署文件：
 
 ```bash
 # 容器化：多阶段构建，运行阶段只保留 dist/ 与 server/，无第三方运行时依赖
@@ -78,7 +91,7 @@ Dockerfile
 cloudbaserc.json         # 目标环境与云托管服务名
 ```
 
-服务以 `PORT=80`、`DB_FILE=/app/data/zhixue.db`、`MinNum=1 / MaxNum=1` 运行，前后端同域（`/api/*` 由同一容器提供），因此不需要配置 CORS 或 API 基地址。
+`cloudbaserc.json` 的 `envId` 取值是 `{{env.ENV_ID}}`，需要先在同目录 `.env.local` 里填真实环境 ID 才能部署。服务以 `PORT=80`、`DB_FILE=/app/data/zhixue.db`、`MinNum=1 / MaxNum=1` 运行，前后端同域（`/api/*` 由同一容器提供），因此不需要配置 CORS 或 API 基地址。
 
 > ⚠️ 容器内 SQLite 为**实例本地存储**：重新部署会重置为全新空库，实例重启也可能丢失数据。演示够用；需要长期留存数据时，应把 `DB_FILE` 指向挂载的持久卷，或迁移到云数据库。
 
@@ -91,7 +104,7 @@ cloudbaserc.json         # 目标环境与云托管服务名
 | 鉴权 | scrypt 口令哈希 + HttpOnly 会话 Cookie（30 天） | 会话存库，登出/改密/重置密码即失效 |
 | 同构 | esbuild 把 `src/domain` 打成服务端模块 | 排程与周报**前后端共用同一份源码**，不存在两套算法 |
 | 离线 | localStorage 操作队列 + `opId` 幂等补传 | 断网可打卡，恢复后按序上行，无效操作自动丢弃 |
-| 测试 | Vitest + `node:test` + CDP | 95 条自动化用例（55 单测 + 31 接口 + 9 助手检索）+ 真实浏览器端到端全链路 |
+| 测试 | Vitest + `node:test` + CDP | 188 条自动化用例（68 前端 + 45 接口 + 75 助手）+ 真实浏览器端到端全链路 |
 
 > 架构文档原定 Go + Postgres。当前环境没有这两者，为了「一条命令就能跑」，后端先落在 Node + SQLite 上；**接口契约与领域规则保持一致**，后续平移 Go 时前端无需改动。
 
@@ -123,7 +136,7 @@ flowchart LR
 
 ```
 src/
-├── domain/            纯函数领域层（无 React、无 IO）+ 44 条单测
+├── domain/            纯函数领域层（无 React、无 IO）+ 55 条单测
 │   ├── templates.ts     知识域树模板（考研 / 考公 / 项目导学）
 │   ├── decompose.ts     三段式拆解
 │   └── replan.ts        重排方案生成
@@ -131,7 +144,9 @@ src/
 ├── data/offlineQueue.ts  离线操作队列（断网暂存 + 幂等补传）
 ├── store.ts           会话与状态（前端唯一数据出口，含乐观更新）
 ├── pages/             Auth / Today / Goal / Week / Report / Settings
-└── components.tsx     Card / Stat / Button / Field / Empty / Meter
+├── components.tsx     Card / Stat / Button / Field / Empty / Meter
+├── Surface.tsx        表层动效：光斑跟随 / 卡片倾斜 / 区块揭示
+└── TaskStack.tsx      七天任务物理堆积（matter-js，动态分包）
 server/
 ├── index.mjs          HTTP 入口：路由、静态资源、统一错误
 ├── api.mjs            业务接口 + 校验 + 状态机
@@ -171,7 +186,7 @@ cloudbaserc.json      云托管环境与服务工作区配置
 ## 测试
 
 ```bash
-npm test              # 领域单测 + 接口测试（68 条）
+npm test              # 前端单测 68 + 接口 45 + 助手 75，共 188 条
 npm run test:unit     # 只跑领域单测
 npm run test:api      # 只跑接口测试
 npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
@@ -179,8 +194,9 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 
 | 层次 | 覆盖重点 |
 |---|---|
-| 领域单测（44） | 空数据、容量为 0、超额、跨天拆分、确定性、目标日期已过、裁断顺序、重排硬约束 |
-| 接口测试（24） | 越权隔离、幂等、非法状态迁移、导出、注销、恢复码、重叠校验、拆解与重排 |
+| 领域单测（55） | 空数据、容量为 0、超额、跨天拆分、确定性、目标日期已过、裁断顺序、重排硬约束 |
+| 接口测试（45） | 越权隔离、幂等、非法状态迁移、导出、注销、恢复码、重叠校验、拆解与重排 |
+| 助手（88） | 检索、会话清理、知识库、路由、工具调用与模型降级（13 前端 + 75 服务端） |
 | 端到端 | 落地页 → 登录 / 免注册登录 → 拆解 → 排程 → 移动任务 → 打卡 → 断网补传 → 周报 → 改设置 → 退出登录 |
 
 安全边界：所有查询按 `user_id` 过滤，越权读写返回 404；口令与 Cookie 不进日志；请求体上限 1 MB；登录与留言按 IP 限流。**默认要求登录**：未登录访问业务接口返回 401；免注册登录建的游客账号只能从那个入口进入，没有可用密码，数据与正式账号互相隔离。
