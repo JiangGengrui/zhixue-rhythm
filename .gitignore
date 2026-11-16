@@ -20,3 +20,9 @@ server/engine.generated.mjs
 # archify 架构图工具的本地缓存
 .archify/
 .archify-path-semantics-*
+
+# 文档只在本地维护，GitHub 仅发布 README（展示图除外）
+/CHANGELOG.md
+/CODEBUDDY.md
+/docs/*
+!/docs/screenshots/

@@ -4,7 +4,7 @@
 
 **把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-[在线体验](https://b7c8a9d6318c4ad99fc1ec1b9572a8ce.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/api/openapi.yaml) · [变更记录](CHANGELOG.md)
+[在线体验](https://b7c8a9d6318c4ad99fc1ec1b9572a8ce.codebuddy.cloudstudio.run)
 
 ![version](https://img.shields.io/badge/version-1.5.2-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
@@ -164,22 +164,15 @@ scripts/
 └── shot.mjs           通用截图（支持浅色主题 / 整页）
 index.html             应用入口（React 应用，打开是落地页）
 privacy.html           隐私说明（第二个构建入口）
-docs/                  文档按主题分层，入口见 docs/README.md
-├── product/           PRD V2.0 / 技术架构设计 / 实施规划
-├── api/openapi.yaml   API 契约
-├── ops/操作手册.md      启动、备份、发布回滚、排障
-├── design/            拆解与重排接入说明 + mockups 线框原型
-├── assistant/         助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
-├── architecture/      手绘 SVG 架构图
-├── screenshots/       README 展示图（npm run shots 生成）
-└── phase2/            第二阶段规划
+docs/screenshots/      README 展示图（npm run shots 生成）
+                       —— docs/ 下其余文档只在本地维护，不纳入版本库
 Dockerfile            云托管容器镜像（多阶段构建）
 cloudbaserc.json      云托管环境与服务工作区配置
 ```
 
 ## 接口
 
-接口全部挂在 `/api` 下，统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。完整定义见 [docs/api/openapi.yaml](docs/api/openapi.yaml)。
+接口全部挂在 `/api` 下，统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。完整契约（OpenAPI）在本地 `docs/api/openapi.yaml` 维护，不在本仓库发布。
 
 | 分组 | 主要端点 |
 |---|---|
@@ -214,7 +207,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 
 ## 版本
 
-当前 **v1.5.2**（阶段一收尾版）。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧实现状态对照见 PRD 第十八章，下一阶段规划见 [`docs/phase2/`](docs/phase2/)。
+当前 **v1.5.2**（阶段一收尾版）。逐版本主题见下表；完整变更记录与下一阶段规划在本地 `CHANGELOG.md`、`docs/phase2/ROADMAP.md` 维护，不随仓库发布。
 
 | 版本 | 主题 |
 |---|---|
@@ -242,21 +235,11 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 1. **忘记密码依赖恢复码**：没有邮件通道，恢复码丢失则无法自助找回。
 2. **多端并发以服务端为准**：后写覆盖，未做字段级冲突合并；离线队列只保证单设备按序补传。
 3. **重排只作用于本周已排任务**：「顺延」恒可用（把本周装不下的推到下周），「压缩 / 替代 / 放弃」仍受未来 7 天负载增幅约束，增幅过大时置灰，此时应调整目标而不是继续排。
-4. **后端为 Node + SQLite**：适合单机演示与课程交付，生产部署需换 Postgres 并做连接池与迁移管理。
+4. **后端为 Node + SQLite**：适合单机个人使用；多实例或长期留存需换 Postgres 并做连接池与迁移管理。
 
 ## 文档
 
-| 文档 | 内容 |
-|---|---|
-| [智学节律 产品需求文档 V2.0](docs/product/智学节律%20产品需求文档.docx) | 17 章功能定义 + 第十八章「实现与迭代记录」（逐轮交付与 P0 状态对照） |
-| [智学节律 技术架构设计](docs/product/智学节律%20技术架构设计.docx) | 技术选型、模块划分、数据模型 |
-| [从 Demo 到正式开发的实施规划](docs/product/从Demo到正式开发%20实施规划%20v1.0.md) | 三条路线对比、模块优先级、六阶段推进与验收标准 |
-| [API 契约](docs/api/openapi.yaml) | 全部端点的请求/响应与错误码 |
-| [操作手册](docs/ops/操作手册.md) | 启动、备份、发布回滚、排障 |
-| [拆解与重排接入说明](docs/design/拆解与重排接入说明.md) | 给前端/UI 的接口形状与呈现约定 |
-| [第二阶段规划](docs/phase2/ROADMAP.md) | 阶段一成果归纳、阶段二范围与里程碑、开工前检查清单 |
-| [助手子系统文档](docs/assistant/) | Agent 助手对话：规格、架构、评审、决策、计划、迭代记录 |
-| [文档地图](docs/README.md) | 上表的入口与阅读顺序 |
+本仓库只发布这份 README。产品需求文档（PRD V2.0）、技术架构设计、实施规划、OpenAPI 契约、运维手册、拆解与重排接入说明、助手子系统文档与阶段规划都在本地 `docs/` 目录维护，按 `.gitignore` 排除，不进版本库。
 
 ## License
 
