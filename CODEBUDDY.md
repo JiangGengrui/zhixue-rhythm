@@ -31,7 +31,6 @@ zhixue-app/
 │  ├─ api.test.mjs          node --test 集成测试（临时库跑真实 HTTP）
 │  └─ assistant/            助手子系统：retrieval / knowledge / prompt / tools / llm
 ├─ scripts/                 运维与验证脚本：backup / e2e / shot / demo-shots
-│  └─ probes/               一次性调试探针（闪烁、morph 动画），不进主流程
 ├─ docs/                    按主题分层：product / api / ops / design / assistant / architecture / screenshots / phase2
 │  └─ README.md             文档地图（先看这个）
 ├─ data/                    运行期 SQLite 文件（不进版本库）
@@ -68,7 +67,7 @@ npm run typecheck
 npm test
 ```
 
-三条命令必须与本表完全一致：改了脚本就同步改这里和 `checklists/GATES.md`，不允许「文档写一套、本地跑另一套」。
+三条命令必须与本表完全一致：改了脚本就同步改这里与 `.github/workflows/ci.yml`，不允许「文档写一套、本地跑另一套」。
 
 ## 3. 代码规范
 

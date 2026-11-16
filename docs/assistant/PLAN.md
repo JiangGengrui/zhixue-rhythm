@@ -6,7 +6,7 @@
 | 依据 | `SPEC.md`（§6 需求、§12 阶段）、`ARCHITECTURE.md` v1.0、`DECISIONS.md` D1–D8 |
 | 语言/栈 | TypeScript + React 19（前端）、Node ≥22 原生 `node:http`/`node:sqlite`（后端） |
 | 验收编号 | `AC-<R号>-<序号>`，如 `AC-2-3` = SPEC §6 R2 的第 3 条验收（见 D8.4） |
-| 闸门 | 每阶段末对照 `checklists/GATES.md`；Gm = `typecheck` / `test` / `build` 三条退出码 0 |
+| 闸门 | 每阶段末对照 `.github/workflows/ci.yml`；Gm = `typecheck` / `test` / `build` 三条退出码 0 |
 
 ## 0. 现状与前提
 

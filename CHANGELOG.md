@@ -2,9 +2,33 @@
 
 本文件记录智学节律从原型到 MVP 交付版的全部迭代。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)：主版本对应可对外交付的形态，次版本对应功能增量，修订号对应缺陷修复。
 
-产品侧的完整说明（含 P0 实现状态、与原规划的偏差）见 `01_选题与方案/智学节律 产品需求文档.docx` 第十八章。
+产品侧的完整说明（含 P0 实现状态、与原规划的偏差）见 `docs/product/智学节律 产品需求文档.docx` 第十八章。
 
-**当前版本：v1.5.1（阶段一收尾：结构分层与文档校准）**
+**当前版本：v1.5.2（收尾清理：删除一次性与课程专属内容）**
+
+---
+
+## [1.5.2] — 2026-11-16
+
+实训与答辩结束，后续由个人维护，清理一次性与课程专属内容。**不涉及运行时行为**，业务代码零改动。
+
+### 删除（v1.5.2）
+
+- **一次性调试脚本**：`scripts/probes/flicker-probe.mjs`、`scripts/probes/morph-probe.mjs`（当初用于排查卡缘闪烁与 morph 动画，问题已修）。
+- **本地运行产物**：`dist/`（166 文件）、`data/`（开发库与 WAL）、`backups/`（11-07 冷备一份）。三者均在 `.gitignore` 内，`npm start`、`npm run backup` 可重新生成。
+- **课程交付目录**（在工作区、不在仓库）：`小组作业/`（他组实现）、`99_归档/`（v0 静态原型）、`02_参考素材/`、`01_选题与方案/`（与 `docs/product/` 重复）、`04_过程记录/`、`05_汇报材料/`、`checklists/`、`03_原型与代码/build/`（生成 PRD 插图的 Python 脚本与 PNG）。
+
+### 文档同步（v1.5.2）
+
+- 闸门引用由 `checklists/GATES.md` 改为 `.github/workflows/ci.yml`（`CODEBUDDY.md`、`docs/assistant/PLAN.md`）。
+- 结构树删除 `scripts/probes/`；PRD 路径由 `01_选题与方案/…docx` 改为 `docs/product/…docx`。
+- `docs/README.md` 去掉「工作区另有同名副本」的说明。
+
+### 保留（有明确理由）
+
+- `00_API密钥/API.txt`：唯一凭据，删除即不可恢复，保留在原地且不入库。
+- `docs/product/*.docx`：产品文档原件，README 与 CHANGELOG 均引用。
+- `docs/design/mockups/`：助手面板形态选型的实物依据（`DECISIONS.md` D4）。
 
 ---
 

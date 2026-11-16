@@ -6,7 +6,7 @@
 
 [在线体验](https://2abd57cc17a34962a6d218640c4a7f1a.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/api/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.5.1-2be6ae)
+![version](https://img.shields.io/badge/version-1.5.2-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
@@ -161,8 +161,7 @@ scripts/
 ├── e2e.mjs            真实 Chrome 走完整链路并截图
 ├── demo-shots.mjs     生成 README 展示图（真实数据）
 ├── backup.mjs         数据库冷备（checkpoint + 保留 14 份）
-├── shot.mjs           通用截图（支持浅色主题 / 整页）
-└── probes/            一次性调试探针（闪烁 / morph）
+└── shot.mjs           通用截图（支持浅色主题 / 整页）
 index.html             应用入口（React 应用，打开是落地页）
 privacy.html           隐私说明（第二个构建入口）
 docs/                  文档按主题分层，入口见 docs/README.md
@@ -215,7 +214,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 
 ## 版本
 
-当前 **v1.5.1**（阶段一收尾版）。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧实现状态对照见 PRD 第十八章，下一阶段规划见 [`docs/phase2/`](docs/phase2/)。
+当前 **v1.5.2**（阶段一收尾版）。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧实现状态对照见 PRD 第十八章，下一阶段规划见 [`docs/phase2/`](docs/phase2/)。
 
 | 版本 | 主题 |
 |---|---|
@@ -236,6 +235,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | v1.4.0 | 像素主题（寒蝉点阵体 + Fusion Pixel 双字体、字号四档收敛）、目标页两列布局 |
 | v1.5.0 | 落地页与登录页回归、免注册登录（游客账号）、通知弹窗定位修复 |
 | v1.5.1 | 阶段一收尾：表层动效与七天堆积补记、目录分层（`src/ui`、`docs/` 主题分层）、文档数字与路径校准 |
+| v1.5.2 | 收尾清理：删除一次性调试探针与本地运行产物，课程交付材料移出仓库，闸门引用改指 CI |
 
 ## 已知限制
 

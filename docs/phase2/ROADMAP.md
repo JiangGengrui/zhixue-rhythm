@@ -21,7 +21,8 @@
 
 ## 2. 收尾阶段（v1.5.1）做了什么
 
-- **结构分层**：`src/ui/` 收纳共享视觉层；`docs/` 按主题分 `api/ops/design/assistant/architecture/screenshots/phase2`；`scripts/probes/` 隔离一次性探针。
+- **结构分层**：`src/ui/` 收纳共享视觉层；`docs/` 按主题分 `api/ops/design/assistant/architecture/screenshots/phase2`。
+- **清理**：一次性调试探针、本地构建产物与数据库、课程交付材料（小组作业、归档原型、过程记录、汇报材料、闸门清单）已删除，仓库只保留产品本身与长期有效文档。
 - **文档校准**：README 用例数统一为 188、`CODEBUDDY.md` 目录树纠错、运维手册按当前部署事实重写、助手知识库 deploy 条目纠错、`npm run shots` 补别名。
 - **版本留痕**：CHANGELOG 补记 v1.5.0 遗漏的动效与 v1.5.1 收尾内容。
 
