@@ -9,7 +9,7 @@ import {
   IconWeek,
   Sparkbars,
   ThemeToggle,
-} from './components';
+} from './ui/components';
 import { useAppState } from './store';
 import { GoalPage } from './pages/GoalPage';
 import { TodayPage } from './pages/TodayPage';

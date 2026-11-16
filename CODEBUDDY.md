@@ -10,13 +10,16 @@
 ```
 zhixue-app/
 ├─ src/                     前端（React 19 + Vite，hash 路由）
-│  ├─ domain/               纯业务逻辑：拆解、排程、重排、预警、周报
+│  ├─ domain/               纯业务逻辑：拆解、排程、重排、预警、周报（前后端共用源码）
 │  │  └─ *.test.ts          vitest 单测，与实现同目录同名
 │  ├─ data/api.ts           API 封装：统一 ApiError(code, status)、同源 Cookie
 │  ├─ data/offlineQueue.ts  离线队列与重放
-│  ├─ pages/                AuthPage / TodayPage / WeekPage / GoalPage / ReportPage / SettingsPage
-│  ├─ landing/              产品主页（纯静态 + 一个 canvas 动效脚本）
-│  ├─ components.tsx        共享组件（无 UI 组件库，手写）
+│  ├─ pages/                LandingPage / AuthPage / TodayPage / WeekPage / GoalPage / ReportPage / SettingsPage
+│  ├─ ui/                   共享视觉层（无 UI 组件库，手写）
+│  │  ├─ components.tsx     Card / Stat / Button / Field / Panel / Modal / Meter / Ring
+│  │  ├─ Surface.tsx        表层动效：光斑跟随 / 卡片倾斜 / 区块揭示
+│  │  └─ TaskStack.tsx      七天任务物理堆积（matter-js，动态分包）
+│  ├─ assistant/            助手面板与前端逻辑：AssistantPanel / useAssistant / sse / suggestions
 │  ├─ App.tsx, store.ts, main.tsx
 │  └─ styles/app.css        全站样式（CSS 变量 + 类名，无预处理器）
 ├─ server/                  后端（原生 node:http + node:sqlite，无框架）
@@ -26,14 +29,14 @@ zhixue-app/
 │  ├─ auth.mjs              会话 Cookie、密码哈希
 │  ├─ engine.generated.mjs  build:engine 产物，勿手改（见下）
 │  ├─ api.test.mjs          node --test 集成测试（临时库跑真实 HTTP）
-│  ├─ assistant/            助手子系统：retrieval / knowledge / prompt / tools / llm
-│  └─ *.test.mjs
+│  └─ assistant/            助手子系统：retrieval / knowledge / prompt / tools / llm
 ├─ scripts/                 运维与验证脚本：backup / e2e / shot / demo-shots
-├─ docs/                    openapi.yaml、操作手册、接入说明、产品文档、截图
-│  └─ assistant/            助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
+│  └─ probes/               一次性调试探针（闪烁、morph 动画），不进主流程
+├─ docs/                    按主题分层：product / api / ops / design / assistant / architecture / screenshots / phase2
+│  └─ README.md             文档地图（先看这个）
 ├─ data/                    运行期 SQLite 文件（不进版本库）
 ├─ dist/                    vite 构建产物（不进版本库）
-├─ index.html / privacy.html              两个入口：应用（今日页）/ 隐私说明（多页构建，见 vite.config.ts；落地页与登录页已移除）
+├─ index.html / privacy.html   两个构建入口：应用（含落地页与登录页）/ 隐私说明，见 vite.config.ts
 └─ CHANGELOG.md
 ```
 
@@ -113,7 +116,7 @@ npm test
 | 不做 | 依据 |
 |---|---|
 | 引入 Express/Koa/Prisma 等框架或 ORM | 现有 `node:http` + `node:sqlite` 足够，换栈带不出收益 |
-| 引入 UI 组件库 / CSS-in-JS | 现有手写组件与 `styles.css` 已成型 |
+| 引入 UI 组件库 / CSS-in-JS | 现有手写组件与 `src/styles/app.css` 已成型 |
 | 改动登录 Cookie 的 `Secure` 属性 | `docs/assistant/DECISIONS.md` D8.3，单独立项 |
 | 助手面板做历史会话列表 UI | D8.1（端点保留，界面不接） |
 | 向量检索 / 执行型 Agent（自动改计划） | SPEC R12、R14，本期不做 |

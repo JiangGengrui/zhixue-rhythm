@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Field, Panel, Stat, ThemeToggle } from '../components';
+import { Button, Field, Panel, Stat, ThemeToggle } from '../ui/components';
 import { api } from '../data/api';
 import type { Settings } from '../domain/types';
 import type { AppState, Actions } from '../store';

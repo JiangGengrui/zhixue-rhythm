@@ -1,6 +1,6 @@
-import { Button, DitherBackdrop, ThemeToggle } from '../components';
-import { Surface } from '../Surface';
-import { TaskStack } from '../TaskStack';
+import { Button, DitherBackdrop, ThemeToggle } from '../ui/components';
+import { Surface } from '../ui/Surface';
+import { TaskStack } from '../ui/TaskStack';
 
 const FEATURES = [
   {

@@ -196,8 +196,8 @@ const ENTRIES = [
     title: '线上部署在哪',
     keys: ['部署', '线上', '服务器', 'cloudbase', '域名'],
     answer:
-      '线上跑在腾讯云 CloudBase 云托管（容器型），前后端同域所以不需要 CORS；容器内 SQLite 是实例本地存储，重新部署会重置为空库。',
-    doc: 'docs/操作手册.md → 发布与回滚',
+      '线上当前跑在 CloudStudio 沙箱：只上传 dist、server、package.json 三部分预构建产物，容器内不装依赖；前后端同域所以不需要 CORS。容器内 SQLite 是实例本地存储，重新部署会重置为空库。沙箱是临时环境，长期对外应换 CloudBase 云托管或自定义域名。',
+    doc: 'docs/ops/操作手册.md → 发布与回滚',
   },
 ];
 

@@ -1,6 +1,6 @@
 /**
  * 闪烁定位探针：连续抓帧 → 逐像素差分，找出持续变化的区域（用于定位卡片边缘闪烁）。
- * 用法：node scripts/flicker-probe.mjs [url]
+ * 用法：node scripts/probes/flicker-probe.mjs [url]
  */
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';

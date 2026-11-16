@@ -4,9 +4,9 @@
 
 **把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-[在线体验](https://20885df2a8c444e2b6ab8ee7e2737049.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/openapi.yaml) · [变更记录](CHANGELOG.md)
+[在线体验](https://20885df2a8c444e2b6ab8ee7e2737049.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/api/openapi.yaml) · [变更记录](CHANGELOG.md)
 
-![version](https://img.shields.io/badge/version-1.5.0-2be6ae)
+![version](https://img.shields.io/badge/version-1.5.1-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
 ![node](https://img.shields.io/badge/Node-22+-339933?logo=node.js&logoColor=white)
@@ -143,34 +143,44 @@ src/
 ├── data/api.ts        唯一的 HTTP 客户端
 ├── data/offlineQueue.ts  离线操作队列（断网暂存 + 幂等补传）
 ├── store.ts           会话与状态（前端唯一数据出口，含乐观更新）
-├── pages/             Auth / Today / Goal / Week / Report / Settings
-├── components.tsx     Card / Stat / Button / Field / Empty / Meter
-├── Surface.tsx        表层动效：光斑跟随 / 卡片倾斜 / 区块揭示
-└── TaskStack.tsx      七天任务物理堆积（matter-js，动态分包）
+├── pages/             Landing / Auth / Today / Goal / Week / Report / Settings
+├── ui/                共享视觉层
+│   ├── components.tsx   Card / Stat / Button / Field / Panel / Modal / Meter / Ring
+│   ├── Surface.tsx      表层动效：光斑跟随 / 卡片倾斜 / 区块揭示
+│   └── TaskStack.tsx    七天任务物理堆积（matter-js，动态分包）
+├── assistant/         助手面板与前端逻辑（Panel / useAssistant / sse / suggestions）
+└── styles/app.css     全站样式（CSS 变量 + 类名，无预处理器）
 server/
 ├── index.mjs          HTTP 入口：路由、静态资源、统一错误
 ├── api.mjs            业务接口 + 校验 + 状态机
 ├── auth.mjs           scrypt 哈希、会话、Cookie、登录限流
 ├── db.mjs             SQLite 建表与幂等迁移
+├── assistant/         助手子系统：检索 / 知识库 / 提示词 / 工具 / 模型
 └── engine.generated.mjs  由 src/domain 打包而来（构建产物，勿手改）
 scripts/
 ├── e2e.mjs            真实 Chrome 走完整链路并截图
 ├── demo-shots.mjs     生成 README 展示图（真实数据）
 ├── backup.mjs         数据库冷备（checkpoint + 保留 14 份）
-└── shot.mjs           通用截图（支持浅色主题 / 整页）
-index.html             应用入口（React 应用，打开即是今日页）
-docs/README.md        文档地图（先看这个）
-docs/product/         PRD（V2.0）/ 技术架构设计 / 实施规划
-docs/assistant/       助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
-docs/openapi.yaml     API 契约
-docs/操作手册.md        启动、备份、回滚、排障
+├── shot.mjs           通用截图（支持浅色主题 / 整页）
+└── probes/            一次性调试探针（闪烁 / morph）
+index.html             应用入口（React 应用，打开是落地页）
+privacy.html           隐私说明（第二个构建入口）
+docs/                  文档按主题分层，入口见 docs/README.md
+├── product/           PRD V2.0 / 技术架构设计 / 实施规划
+├── api/openapi.yaml   API 契约
+├── ops/操作手册.md      启动、备份、发布回滚、排障
+├── design/            拆解与重排接入说明 + mockups 线框原型
+├── assistant/         助手子系统：SPEC / PLAN / ARCHITECTURE / DECISIONS / LOOPS
+├── architecture/      手绘 SVG 架构图
+├── screenshots/       README 展示图（npm run shots 生成）
+└── phase2/            第二阶段规划
 Dockerfile            云托管容器镜像（多阶段构建）
 cloudbaserc.json      云托管环境与服务工作区配置
 ```
 
 ## 接口
 
-接口全部挂在 `/api` 下，统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。完整定义见 [docs/openapi.yaml](docs/openapi.yaml)。
+接口全部挂在 `/api` 下，统一返回 `{ error: { code, message } }`，业务码 `E1xxx` 参数、`E2xxx` 认证、`E4xxx` 冲突、`E5xxx` 服务端。完整定义见 [docs/api/openapi.yaml](docs/api/openapi.yaml)。
 
 | 分组 | 主要端点 |
 |---|---|
@@ -205,7 +215,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 
 ## 版本
 
-当前 **v1.5.0**。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧的实现状态对照见 PRD 第十八章。
+当前 **v1.5.1**（阶段一收尾版）。完整变更见 [CHANGELOG.md](CHANGELOG.md)，产品侧实现状态对照见 PRD 第十八章，下一阶段规划见 [`docs/phase2/`](docs/phase2/)。
 
 | 版本 | 主题 |
 |---|---|
@@ -225,6 +235,7 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | v1.3.2 | 界面精简（设置表单弹窗化、删除原理说明卡片）与计划链修复（通知去重时区、完成表单、离线计时、跨周生成、入口缓存） |
 | v1.4.0 | 像素主题（寒蝉点阵体 + Fusion Pixel 双字体、字号四档收敛）、目标页两列布局 |
 | v1.5.0 | 落地页与登录页回归、免注册登录（游客账号）、通知弹窗定位修复 |
+| v1.5.1 | 阶段一收尾：表层动效与七天堆积补记、目录分层（`src/ui`、`docs/` 主题分层）、文档数字与路径校准 |
 
 ## 已知限制
 
@@ -240,9 +251,10 @@ npm run test:e2e      # 真实 Chrome 走完整链路（23 项检查）
 | [智学节律 产品需求文档 V2.0](docs/product/智学节律%20产品需求文档.docx) | 17 章功能定义 + 第十八章「实现与迭代记录」（逐轮交付与 P0 状态对照） |
 | [智学节律 技术架构设计](docs/product/智学节律%20技术架构设计.docx) | 技术选型、模块划分、数据模型 |
 | [从 Demo 到正式开发的实施规划](docs/product/从Demo到正式开发%20实施规划%20v1.0.md) | 三条路线对比、模块优先级、六阶段推进与验收标准 |
-| [API 契约](docs/openapi.yaml) | 全部端点的请求/响应与错误码 |
-| [操作手册](docs/操作手册.md) | 启动、备份、回滚、排障 |
-| [拆解与重排接入说明](docs/拆解与重排接入说明.md) | 给前端/UI 的接口形状与呈现约定 |
+| [API 契约](docs/api/openapi.yaml) | 全部端点的请求/响应与错误码 |
+| [操作手册](docs/ops/操作手册.md) | 启动、备份、发布回滚、排障 |
+| [拆解与重排接入说明](docs/design/拆解与重排接入说明.md) | 给前端/UI 的接口形状与呈现约定 |
+| [第二阶段规划](docs/phase2/ROADMAP.md) | 阶段一成果归纳、阶段二范围与里程碑、开工前检查清单 |
 | [助手子系统文档](docs/assistant/) | Agent 助手对话：规格、架构、评审、决策、计划、迭代记录 |
 | [文档地图](docs/README.md) | 上表的入口与阅读顺序 |
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Empty, Meter, Panel, Ring, Stat } from '../components';
+import { Button, Empty, Meter, Panel, Ring, Stat } from '../ui/components';
 import { addDays, fmtDuration, startOfWeek, todayISO } from '../domain/date';
 import type { Report } from '../domain/types';
 import { api } from '../data/api';

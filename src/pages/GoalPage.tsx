@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Empty, Field, Meter, Modal, Panel, Ring, Stat } from '../components';
+import { Button, Empty, Field, Meter, Modal, Panel, Ring, Stat } from '../ui/components';
 import { feasibility } from '../domain/engine';
 import { LEVEL_LABEL, SUBJECT_LABEL } from '../domain/types';
 import type { GoalTemplate, Level, StageKey, Subject, Verdict } from '../domain/types';

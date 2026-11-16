@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Empty, Field, Meter, Modal, Panel } from '../components';
+import { Button, Empty, Field, Meter, Modal, Panel } from '../ui/components';
 import { packWeek } from '../domain/engine';
 import { addDays, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import type { AppState, Actions } from '../store';

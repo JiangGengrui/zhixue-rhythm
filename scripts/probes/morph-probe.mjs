@@ -1,7 +1,7 @@
 /**
  * 换词动画探针：按固定间隔抓帧，只裁出标语关键词那一小块，输出亮度序列。
  * 若过渡生效，亮度会呈现「渐暗 → 落到低点 → 渐亮」的过程，而不是一帧内跳变。
- * 用法：node scripts/morph-probe.mjs [url]
+ * 用法：node scripts/probes/morph-probe.mjs [url]
  */
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';

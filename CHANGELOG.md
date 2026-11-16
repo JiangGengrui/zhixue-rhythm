@@ -4,7 +4,40 @@
 
 产品侧的完整说明（含 P0 实现状态、与原规划的偏差）见 `01_选题与方案/智学节律 产品需求文档.docx` 第十八章。
 
-**当前版本：v1.5.0（落地页、登录页与免注册登录）**
+**当前版本：v1.5.1（阶段一收尾：结构分层与文档校准）**
+
+---
+
+## [1.5.1] — 2026-11-16
+
+阶段一收尾：不新增业务功能，只做结构分层、文档校准与第二阶段准备。
+
+### 补记 v1.5.0 遗漏（v1.5.1）
+
+- **表层动效** `src/ui/Surface.tsx`：指针光斑跟随、卡片轻微倾斜、区块进入视口逐个揭示；`prefers-reduced-motion` 下整体降级并拆除指针监听。
+- **七天任务堆积** `src/ui/TaskStack.tsx`：matter-js 按实际时长把任务方块堆成柱体，静止 24 帧后停帧；`import()` 单独成 chunk（86 KB / gzip 28 KB），主包体积不变。
+- 以上两项提交于 v1.5.0 之后但未记入本文件，此处补齐。
+
+### 结构重构（v1.5.1）
+
+- `src/components.tsx`、`src/Surface.tsx`、`src/TaskStack.tsx` → `src/ui/`：共享视觉层与业务代码分开，7 处 import 同步更新。
+- `docs/` 按主题分层：`api/`（OpenAPI 契约）、`ops/`（运维手册）、`design/`（接入说明 + `mockups/` 线框原型）、`architecture/`（手绘架构图）、`phase2/`（下一阶段规划）；仓库根目录不再散落 `mockups/` 与 `ARCHITECTURE.diagram.html`。
+- `scripts/flicker-probe.mjs`、`scripts/morph-probe.mjs` → `scripts/probes/`，与运维脚本区分。
+- 新增 [`docs/phase2/ROADMAP.md`](docs/phase2/ROADMAP.md)：阶段一成果归纳、阶段二范围与里程碑、开工前检查清单。
+
+### 文档校准（v1.5.1）
+
+- **`CODEBUDDY.md` 目录树与实际脱节**：仍写 `src/landing/`、写「落地页与登录页已移除」，而两者在 v1.5.0 已回归；补 `src/ui/`、`server/assistant/`，样式路径由 `styles.css` 更正为 `src/styles/app.css`。
+- **运维手册**：版本停在 v1.3.2，且把线上写成 CloudBase 云托管（实际是 CloudStudio 沙箱）、冒烟路径写 `/app.html`（该入口已不存在）、验收命令写 95 条（实际 188）。按当前事实重写，补沙箱「预构建产物」发布流程与线上冒烟表。
+- **助手知识库 `knowledge.mjs` 的 deploy 条目**：同样把线上环境写成 CloudBase 云托管，会直接答错，改为沙箱 + 预构建产物的事实描述。
+- **README**：用例数统一为 188（68 + 45 + 75）、结构树补 `src/ui` 与 `docs` 分层、文档表路径随分层更新、版本徽章与版本表补 v1.5.1。
+- **`npm run shots`**：`docs/README.md` 一直引用该命令但 `package.json` 未定义，已补别名。
+
+### 已知遗留（v1.5.1）
+
+- `docs/product/*.docx` 是二进制交付物，未随本轮结构调整同步路径引用（PRD 第十八章仍指旧位置）。
+- GitHub 仓库 About 的 Website 链接未设置（`gh` 未登录），线上地址目前只在 README 正文。
+- 端到端检查项数未复核：README 记 23 项，`scripts/e2e.mjs` 中断言调用 63 处，两者口径不同。
 
 ---
 

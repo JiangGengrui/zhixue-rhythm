@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Button, Field, ThemeToggle } from '../components';
+import { Button, Field, ThemeToggle } from '../ui/components';
 import type { Actions } from '../store';
 
 type Mode = 'login' | 'register' | 'recover';

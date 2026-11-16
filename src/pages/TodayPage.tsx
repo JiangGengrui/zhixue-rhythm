@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Empty, IconCheck, Panel, Ring, Stat } from '../components';
+import { Button, Empty, IconCheck, Panel, Ring, Stat } from '../ui/components';
 import { addDays, daysBetween, fmtDuration, fmtHM, startOfWeek, todayISO, weekDates, weekdayOf } from '../domain/date';
 import { SUBJECT_LABEL } from '../domain/types';
 import type { Block } from '../domain/types';
