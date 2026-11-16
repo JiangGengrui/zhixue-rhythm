@@ -7,7 +7,14 @@ import { MAX_DAILY_QUESTIONS } from './assistant/sessions.mjs';
 import { DEGRADED_DATA_TEXT } from './assistant/prompt.mjs';
 import { FAULT_KINDS } from './assistant/faults.mjs';
 import { createToolbox } from './assistant/tools.mjs';
-import { todayISO } from './engine.generated.mjs';
+import { todayISO, addDays, startOfWeek } from './engine.generated.mjs';
+
+/**
+ * 用例要断言「整周容量都可用」，就不能把周次写死：写死的日期一旦成为过去，
+ * 「本周」会变成「上周」，顺延/重排会因为没有剩余天而产出空结果。
+ * 这里统一取「下一周的周一」，与今天是周几无关。
+ */
+const nextWeekStart = () => addDays(startOfWeek(todayISO(), 1), 7);
 
 // 测试必须自洽：本机若配了真实的 ASSISTANT_API_KEY，B 类用例会真的去请求上游，
 // 结果取决于网络而不是代码。服务启动前清掉，保证「无 Key」是确定的前提。
@@ -405,7 +412,8 @@ test('任务锁定：锁定块在重建与重排中保留，且禁止移动', as
   for (const t of ['A', 'B']) {
     await call('POST', '/api/items', { title: t, subject: 'major', estimateMin: 120, weight: 4 }, cookie);
   }
-  const gen = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09' }, cookie);
+  const week = nextWeekStart();
+  const gen = await call('POST', '/api/plan/generate', { weekStart: week }, cookie);
   assert.ok(gen.json.blocks.length >= 2);
   const [first] = gen.json.blocks;
 
@@ -414,19 +422,19 @@ test('任务锁定：锁定块在重建与重排中保留，且禁止移动', as
   assert.equal(locked.json.block.locked, true);
 
   // 锁定块禁止移动
-  const moved = await call('PATCH', `/api/blocks/${first.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
+  const moved = await call('PATCH', `/api/blocks/${first.id}`, { date: addDays(week, 3), startMin: 600 }, cookie);
   assert.equal(moved.status, 400);
   assert.equal(moved.json.error.code, 'E1038');
 
   // 整周重建：锁定块保留，未锁定块被重排
-  const rebuilt = await call('POST', '/api/plan/generate', { weekStart: '2026-11-09', mode: 'rebuild' }, cookie);
+  const rebuilt = await call('POST', '/api/plan/generate', { weekStart: week, mode: 'rebuild' }, cookie);
   const keptLock = rebuilt.json.blocks.find((b) => b.id === first.id);
   assert.ok(keptLock, '重建后锁定块应保留');
   assert.equal(keptLock.date, first.date);
   assert.equal(keptLock.startMin, first.startMin);
 
   // 重排应用：锁定块时间不变
-  const applied = await call('POST', '/api/plan/replan/apply', { week: '2026-11-09', option: 'defer' }, cookie);
+  const applied = await call('POST', '/api/plan/replan/apply', { week, option: 'defer' }, cookie);
   assert.equal(applied.status, 200, JSON.stringify(applied.json));
   const keptLock2 = applied.json.blocks.find((b) => b.id === first.id);
   assert.ok(keptLock2, '重排后锁定块应保留');
@@ -435,7 +443,7 @@ test('任务锁定：锁定块在重建与重排中保留，且禁止移动', as
   // 未锁定的块可以移动（重排会重新分配时间，id 可能已更新，取重排结果里的未锁定块）
   const target = applied.json.blocks.find((b) => !b.locked && b.id !== first.id);
   assert.ok(target, '重排后应仍有未锁定块');
-  const unlockedMove = await call('PATCH', `/api/blocks/${target.id}`, { date: '2026-11-12', startMin: 600 }, cookie);
+  const unlockedMove = await call('PATCH', `/api/blocks/${target.id}`, { date: addDays(week, 3), startMin: 600 }, cookie);
   assert.equal(unlockedMove.status, 200, JSON.stringify(unlockedMove.json));
 });
 
@@ -809,7 +817,7 @@ test('重排：四个方案 + 应用顺延 + 未知方案被拒', async () => {
   for (const title of ['A', 'B', 'C']) {
     await call('POST', '/api/items', { title, subject: 'math', estimateMin: 300, weight: 4 }, cookie);
   }
-  const week = '2026-11-09';
+  const week = nextWeekStart();
 
   const plan = await call('GET', `/api/plan/replan?week=${week}`, null, cookie);
   assert.equal(plan.status, 200, JSON.stringify(plan.json));
