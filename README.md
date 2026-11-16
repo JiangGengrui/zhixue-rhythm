@@ -4,7 +4,7 @@
 
 **把长期目标拆到今天，偏离计划时给出可以执行的调整——而不是让你自责。**
 
-[在线体验](https://20885df2a8c444e2b6ab8ee7e2737049.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/api/openapi.yaml) · [变更记录](CHANGELOG.md)
+[在线体验](https://2abd57cc17a34962a6d218640c4a7f1a.codebuddy.cloudstudio.run) · [产品文档](docs/product/) · [接口契约](docs/api/openapi.yaml) · [变更记录](CHANGELOG.md)
 
 ![version](https://img.shields.io/badge/version-1.5.1-2be6ae)
 ![react](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
